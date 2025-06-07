@@ -24,6 +24,8 @@ services:
       dockerfile: Dockerfile
     container_name: kanban_frontend
     restart: always
+    depends_on:
+      - lamoda-app
     ports:
       - "3080:80"
     networks:

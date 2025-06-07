@@ -62,7 +62,7 @@ func Init(cfg *config.Config) (*Server, error) {
 	}
 	r := gin.Default()
 	r.Use(corsMiddleware(cfg))
-	
+
 	// --- ИЗМЕНЕНИЕ ЛОГИКИ РОУТИНГА ---
 
 	// Initialize repositories and handlers
@@ -114,7 +114,6 @@ func Init(cfg *config.Config) (*Server, error) {
 		}
 	}
 
-
 	return &Server{
 		Engine: r,
 		DB:     db,
@@ -165,6 +164,21 @@ func (s *Server) Run() {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+
+	go func() {
+		log.Printf("🚀 Server running on port %s", s.Config.ServerPort)
+		log.Printf("📚 API endpoints available:")
+		log.Printf("   POST /api/auth/register - User registration")
+		log.Printf("   POST /api/auth/login - User login")
+		log.Printf("   GET  /api/profile - Get user profile (protected)")
+		log.Printf("   PUT  /api/profile - Update user profile (protected)")
+		log.Printf("   POST /api/password/change - Change password (protected)")
+		log.Printf("   GET  /api/health - Health check")
+
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to listen: %s", err)
+		}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
