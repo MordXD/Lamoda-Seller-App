@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const apiClient = axios.create({
-  baseURL: 'http://localhost:3001/api', // URL бэкенда
+  baseURL: 'http://localhost:8080', // URL бэкенда (порт 8080)
 });
 
 // Интерцептор, который будет добавлять токен ко всем запросам
