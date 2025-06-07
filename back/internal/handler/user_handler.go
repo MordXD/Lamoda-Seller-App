@@ -1,5 +1,3 @@
-// internal/handler/user_handler.go
-
 package handler
 
 import (
@@ -62,6 +60,17 @@ type LinkAccountRequest struct {
 
 type SwitchAccountRequest struct {
 	TargetUserID uuid.UUID `json:"target_user_id" binding:"required"`
+}
+
+// --- НОВЫЕ СТРУКТУРЫ ДЛЯ БАЛАНСА ---
+type AddBalanceRequest struct {
+	// Сумма должна быть больше 0
+	AmountKopecks int64 `json:"amount_kopecks" binding:"required,gt=0"`
+}
+
+type WithdrawBalanceRequest struct {
+	// Сумма должна быть больше 0
+	AmountKopecks int64 `json:"amount_kopecks" binding:"required,gt=0"`
 }
 
 // --- Хендлеры ---
@@ -186,16 +195,15 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 
 	user, err := h.repo.GetByID(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"id":         user.ID,
-		"email":      user.Email,
-		"name":       user.Name,
-		"created_at": user.CreatedAt,
-	})
+	c.JSON(http.StatusOK, user) // Теперь можно просто вернуть всю структуру User
 }
 
 // UpdateProfile - реализация для вашего роута PUT /api/profile (для смены имени)
@@ -309,4 +317,65 @@ func (h *UserHandler) GetLinkedAccounts(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, accounts)
+}
+
+// --- НОВЫЕ ХЕНДЛЕРЫ ДЛЯ БАЛАНСА ---
+
+// GetBalance возвращает текущий баланс пользователя.
+func (h *UserHandler) GetBalance(c *gin.Context) {
+	userID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+
+	user, err := h.repo.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"balance_kopecks": user.BalanceKopecks})
+}
+
+// AddBalance пополняет баланс пользователя.
+func (h *UserHandler) AddBalance(c *gin.Context) {
+	var req AddBalanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
+		return
+	}
+
+	userID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+
+	if err := h.repo.UpdateBalance(c.Request.Context(), userID, req.AmountKopecks); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update balance"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "balance updated successfully"})
+}
+
+// WithdrawBalance снимает средства с баланса пользователя.
+func (h *UserHandler) WithdrawBalance(c *gin.Context) {
+	var req WithdrawBalanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
+		return
+	}
+
+	userID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+
+	// Передаем отрицательное значение для снятия
+	err := h.repo.UpdateBalance(c.Request.Context(), userID, -req.AmountKopecks)
+	if err != nil {
+		if errors.Is(err, repository.ErrInsufficientFunds) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update balance"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "withdrawal successful"})
 }

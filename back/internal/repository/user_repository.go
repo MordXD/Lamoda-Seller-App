@@ -12,6 +12,9 @@ import (
 	"github.com/lamoda-seller-app/internal/model"
 )
 
+// --- НОВАЯ ОШИБКА ---
+var ErrInsufficientFunds = errors.New("insufficient funds")
+
 type UserRepository struct {
 	db *gorm.DB
 }
@@ -21,6 +24,40 @@ func NewUserRepository(db *gorm.DB) *UserRepository {
 }
 
 // ... существующие методы ...
+
+// --- НОВЫЙ МЕТОД ДЛЯ АТОМАРНОГО ОБНОВЛЕНИЯ БАЛАНСА ---
+
+// UpdateBalance атомарно изменяет баланс пользователя.
+// amount может быть положительным (пополнение) или отрицательным (снятие).
+// Метод проверяет, что баланс не станет отрицательным.
+func (r *UserRepository) UpdateBalance(ctx context.Context, userID uuid.UUID, amount int64) error {
+	// Для снятия средств (amount < 0) мы добавляем условие в WHERE,
+	// чтобы запрос не выполнился, если итоговый баланс будет меньше нуля.
+	// Для пополнения (amount >= 0) это условие всегда будет истинным.
+	tx := r.db.WithContext(ctx).Model(&model.User{}).
+		Where("id = ? AND balance_kopecks + ? >= 0", userID, amount).
+		Update("balance_kopecks", gorm.Expr("balance_kopecks + ?", amount))
+
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	// Если ни одна строка не была затронута, это означает, что условие WHERE не выполнилось.
+	// В нашем случае это значит, что на счете недостаточно средств для снятия.
+	if tx.RowsAffected == 0 {
+		// Мы должны проверить, существует ли пользователь вообще, чтобы не возвращать
+		// ложную ошибку о нехватке средств для несуществующего ID.
+		var count int64
+		r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", userID).Count(&count)
+		if count > 0 {
+			return ErrInsufficientFunds
+		}
+	}
+
+	return nil
+}
+
+// --- СУЩЕСТВУЮЩИЕ МЕТОДЫ ---
 
 func (r *UserRepository) Create(ctx context.Context, user *model.User) error {
 	return r.db.WithContext(ctx).Create(user).Error
@@ -50,11 +87,8 @@ func (r *UserRepository) UpdateUser(ctx context.Context, user *model.User) error
 	return r.db.WithContext(ctx).Save(user).Error
 }
 
-// --- НОВЫЕ МЕТОДЫ ДЛЯ СВЯЗАННЫХ АККАУНТОВ ---
-
-// LinkAccounts создает запись о связи двух аккаунтов.
+// ... методы для связанных аккаунтов остаются без изменений ...
 func (r *UserRepository) LinkAccounts(ctx context.Context, primaryUserID, linkedUserID uuid.UUID) error {
-	// Предотвращаем создание петли (связь аккаунта с самим собой)
 	if primaryUserID == linkedUserID {
 		return errors.New("cannot link an account to itself")
 	}
@@ -62,11 +96,9 @@ func (r *UserRepository) LinkAccounts(ctx context.Context, primaryUserID, linked
 		PrimaryUserID: primaryUserID,
 		LinkedUserID:  linkedUserID,
 	}
-	// `FirstOrCreate` предотвратит создание дубликатов
 	return r.db.WithContext(ctx).Where(link).FirstOrCreate(link).Error
 }
 
-// CheckAccountLink проверяет, существует ли разрешение на переключение.
 func (r *UserRepository) CheckAccountLink(ctx context.Context, primaryUserID, linkedUserID uuid.UUID) (bool, error) {
 	var count int64
 	err := r.db.WithContext(ctx).Model(&model.AccountLink{}).
@@ -78,11 +110,8 @@ func (r *UserRepository) CheckAccountLink(ctx context.Context, primaryUserID, li
 	return count > 0, nil
 }
 
-// GetLinkedAccounts возвращает список пользователей, на которых можно переключиться.
 func (r *UserRepository) GetLinkedAccounts(ctx context.Context, primaryUserID uuid.UUID) ([]model.User, error) {
     var users []model.User
-    
-    // Находим ID связанных аккаунтов
     var linkedIDs []uuid.UUID
     err := r.db.WithContext(ctx).Model(&model.AccountLink{}).
         Where("primary_user_id = ?", primaryUserID).
@@ -90,12 +119,9 @@ func (r *UserRepository) GetLinkedAccounts(ctx context.Context, primaryUserID uu
     if err != nil {
         return nil, err
     }
-
     if len(linkedIDs) == 0 {
-        return []model.User{}, nil // Возвращаем пустой слайс, а не nil
+        return []model.User{}, nil
     }
-
-    // Получаем информацию о пользователях по их ID
     err = r.db.WithContext(ctx).Where("id IN ?", linkedIDs).Find(&users).Error
     return users, err
 }

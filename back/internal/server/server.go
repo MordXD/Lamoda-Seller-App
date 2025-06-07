@@ -53,7 +53,7 @@ func Init(cfg *config.Config) (*Server, error) {
 
 	// !!! ДОБАВЛЯЕМ НОВЫЕ МОДЕЛИ ПРОДУКТА В МИГРАЦИЮ !!!
 	if err := db.AutoMigrate(
-		&model.User{}, 
+		&model.User{},
 		&model.AccountLink{},
 		&model.Product{},
 		&model.ProductVariant{},
@@ -78,7 +78,6 @@ func Init(cfg *config.Config) (*Server, error) {
 	productRepo := repository.NewProductRepository(db)
 	productHandler := handler.NewProductHandler(productRepo)
 	userHandler := handler.NewUserHandler(userRepo)
-	
 
 	// Создаем одну родительскую группу /api
 	api := r.Group("/api")
@@ -103,24 +102,30 @@ func Init(cfg *config.Config) (*Server, error) {
 		}
 
 		// --- Protected Routes ---
-		// Эта группа тоже вложена в /api.
-		// Мы можем создать группу с пустым путем, чтобы применить middleware только к ней.
 		protected := api.Group("/")
 		protected.Use(middleware.JWTAuthMiddleware())
 		{
-			// Profile routes: /api/profile
+			// Profile routes
 			protected.GET("/profile", userHandler.GetProfile)
 			protected.PUT("/profile", userHandler.UpdateProfile)
 
-			// Password routes: /api/password/change
+			// Password routes
 			protected.POST("/password/change", userHandler.ChangePassword)
 
-			// Account management routes: /api/account/*
+			// Account management routes
 			account := protected.Group("/account")
 			{
 				account.POST("/link", userHandler.LinkAccount)
 				account.POST("/switch", userHandler.SwitchAccount)
 				account.GET("/links", userHandler.GetLinkedAccounts)
+			}
+
+			// --- !!! НОВЫЕ МАРШРУТЫ ДЛЯ БАЛАНСА !!! ---
+			balance := protected.Group("/balance")
+			{
+				balance.GET("", userHandler.GetBalance)                // Получить текущий баланс
+				balance.POST("/add", userHandler.AddBalance)           // Пополнить баланс
+				balance.POST("/withdraw", userHandler.WithdrawBalance) // Снять с баланса
 			}
 			// --- !!! НОВЫЕ МАРШРУТЫ ДЛЯ ПРОДАВЦА !!! ---
 			seller := protected.Group("/seller")
