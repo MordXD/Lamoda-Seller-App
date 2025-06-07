@@ -65,7 +65,20 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 		query = query.Where("LOWER(name) LIKE ? OR LOWER(sku) LIKE ? OR LOWER(brand) LIKE ?", searchQuery, searchQuery, searchQuery)
 	}
 	if params.Category != "" {
-		query = query.Where("category = ?", params.Category)
+		// Для поддержки вложенных категорий, нужно найти все дочерние ID
+		var categoryIDs []string
+		// Рекурсивная функция для сбора всех ID дочерних категорий
+		var findSubCategoryIDs func(parentID string)
+		findSubCategoryIDs = func(parentID string) {
+			categoryIDs = append(categoryIDs, parentID)
+			var subIDs []string
+			r.db.Model(&model.Category{}).Where("parent_id = ?", parentID).Pluck("id", &subIDs)
+			for _, subID := range subIDs {
+				findSubCategoryIDs(subID)
+			}
+		}
+		findSubCategoryIDs(params.Category)
+		query = query.Where("category_id IN (?)", categoryIDs)
 	}
 	if params.Brand != "" {
 		query = query.Where("brand = ?", params.Brand)
@@ -78,7 +91,7 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 	}
 	switch params.StockStatus {
 	case "in_stock":
-		query = query.Where("total_stock > 10") // Примерное значение "в наличии"
+		query = query.Where("total_stock > 10")
 	case "low_stock":
 		query = query.Where("total_stock > 0 AND total_stock <= 10")
 	case "out_of_stock":
@@ -86,10 +99,7 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 	}
 
 	// --- 2. Получаем данные для блока `filters` (до применения пагинации) ---
-	// Клонируем запрос, чтобы основные фильтры (кроме цены/категории/бренда) не влияли на подсчеты
-	// Здесь упрощенная логика: мы считаем фильтры на основе уже отфильтрованного набора.
-	// В реальном приложении это может быть сложнее.
-	err := r.calculateFilters(query.Session(&gorm.Session{}), &filters)
+	err := r.calculateFilters(r.db.WithContext(ctx).Model(&model.Product{}), &filters, params)
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("failed to calculate filters: %w", err)
 	}
@@ -102,10 +112,9 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 
 	// --- 4. Применяем сортировку ---
 	if params.SortBy != "" {
-		// Валидация, чтобы избежать SQL-инъекций
 		allowedSorts := map[string]string{
 			"name": "name", "price": "price", "stock": "total_stock",
-			"sales": "sales_count_30d", // Потребует JOIN или хранимое поле
+			"sales": "sales_count_30d",
 			"created_date": "created_at",
 		}
 		dbColumn, ok := allowedSorts[params.SortBy]
@@ -117,11 +126,10 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 			query = query.Order(fmt.Sprintf("%s %s", dbColumn, order))
 		}
 	} else {
-		query = query.Order("created_at DESC") // Сортировка по умолчанию
+		query = query.Order("created_at DESC")
 	}
 
 	// --- 5. Применяем пагинацию и получаем товары ---
-	// Preload для загрузки изображений, чтобы найти главное
 	err = query.Preload("Images").Offset(params.Offset).Limit(params.Limit).Find(&products).Error
 	if err != nil {
 		return nil, 0, nil, err
@@ -132,20 +140,35 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 
 
 // calculateFilters вычисляет доступные фильтры на основе текущего запроса.
-func (r *ProductRepository) calculateFilters(query *gorm.DB, filters *FilterValues) error {
-	// Категории
-	rows, err := query.Select("category as id, category as name, count(*) as count").Group("category").Rows()
-	if err != nil { return err }
-	defer rows.Close()
-	for rows.Next() {
-		var cat FilterCount
-		if err := r.db.ScanRows(rows, &cat); err == nil {
-			filters.Categories = append(filters.Categories, cat)
-		}
+// Важный момент: для подсчета фильтров часто нужна логика, отличная от основного запроса.
+// Например, если выбрана категория "Платья", мы все равно хотим показать другие доступные категории.
+// Здесь представлена упрощенная версия для демонстрации.
+func (r *ProductRepository) calculateFilters(baseQuery *gorm.DB, filters *FilterValues, params ListProductsParams) error {
+	// Категории: считаем количество товаров в каждой категории верхнего уровня
+	// Мы клонируем базовый запрос, но сбрасываем фильтр по категории
+	categoryQuery := baseQuery.Session(&gorm.Session{}) // Создаем новую сессию
+	if params.Search != "" {
+		searchQuery := "%" + strings.ToLower(params.Search) + "%"
+		categoryQuery = categoryQuery.Where("LOWER(name) LIKE ? OR LOWER(sku) LIKE ?", searchQuery, searchQuery)
 	}
+	// ... можно применить и другие фильтры, кроме категории
+	
+	err := categoryQuery.Table("products").
+		Select("categories.id, categories.name, count(products.id) as count").
+		Joins("join categories on categories.id = products.category_id").
+		Group("categories.id, categories.name").
+		Scan(&filters.Categories).Error
+	if err != nil { return err }
 
 	// Бренды
-	rows, err = query.Select("brand as id, brand as name, count(*) as count").Group("brand").Rows()
+	brandQuery := baseQuery.Session(&gorm.Session{}) // Новая сессия для брендов
+	// Применяем все фильтры, КРОМЕ бренда
+	if params.Category != "" {
+		// ... логика поиска дочерних категорий, как в List ...
+		brandQuery = brandQuery.Where("category_id = ?", params.Category)
+	}
+	
+	rows, err := brandQuery.Select("brand as id, brand as name, count(*) as count").Group("brand").Rows()
 	if err != nil { return err }
 	defer rows.Close()
 	for rows.Next() {
@@ -155,8 +178,16 @@ func (r *ProductRepository) calculateFilters(query *gorm.DB, filters *FilterValu
 		}
 	}
 
-	// Диапазон цен
-	return query.Select("COALESCE(MIN(price), 0) as min, COALESCE(MAX(price), 0) as max").Row().Scan(&filters.PriceRange.Min, &filters.PriceRange.Max)
+	// Диапазон цен (считаем на основе всех фильтров, кроме цены)
+	priceQuery := baseQuery.Session(&gorm.Session{})
+	if params.Category != "" {
+		priceQuery = priceQuery.Where("category_id = ?", params.Category)
+	}
+	if params.Brand != "" {
+		priceQuery = priceQuery.Where("brand = ?", params.Brand)
+	}
+
+	return priceQuery.Select("COALESCE(MIN(price), 0) as min, COALESCE(MAX(price), 0) as max").Row().Scan(&filters.PriceRange.Min, &filters.PriceRange.Max)
 }
 
 // GetByID возвращает товар по его ID со всеми связанными данными.
@@ -166,14 +197,13 @@ func (r *ProductRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 		Preload("Images").
 		Preload("Variants").
 		Preload("Supplier").
-		First(&product, id).Error
+		Preload("Category"). // Добавлено для загрузки информации о категории
+		First(&product, "id = ?", id).Error
 	return &product, err
 }
 
 // Create создает новый товар.
 func (r *ProductRepository) Create(ctx context.Context, product *model.Product) error {
-	// В реальном приложении логика расчета TotalStock и других полей
-	// должна быть в транзакции или в сервисе.
 	var totalStock int
 	for _, v := range product.Variants {
 		totalStock += v.Stock
@@ -185,21 +215,17 @@ func (r *ProductRepository) Create(ctx context.Context, product *model.Product) 
 
 // Update обновляет товар.
 func (r *ProductRepository) Update(ctx context.Context, product *model.Product) error {
-	// Логика обновления может быть сложной (например, обновление вариантов)
-	// Здесь для простоты используется Save, который обновит все поля.
 	var totalStock int
 	for _, v := range product.Variants {
 		totalStock += v.Stock
 	}
 	product.TotalStock = totalStock
 	
-	// Используем `Session` и `FullSave` для обновления ассоциаций
 	return r.db.WithContext(ctx).Session(&gorm.Session{FullSaveAssociations: true}).Save(product).Error
 }
 
 // Delete удаляет товар.
 func (r *ProductRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	// GORM автоматически удалит связанные записи (variants, images) если настроен foreign key constraint `onDelete:CASCADE`
 	return r.db.WithContext(ctx).Select("Variants", "Images").Delete(&model.Product{ID: id}).Error
 }
 
@@ -208,36 +234,31 @@ func (r *ProductRepository) CreateImage(ctx context.Context, image *model.Produc
     return r.db.WithContext(ctx).Create(image).Error
 }
 
-// GetCategories (Заглушка)
+// GetCategories получает все категории с их иерархией из базы данных.
 func (r *ProductRepository) GetCategories(ctx context.Context) ([]model.Category, error) {
-	// В реальном приложении это будет запрос к таблице категорий
-	return []model.Category{
-		{ID: "clothing", Name: "Одежда", Subcategories: []model.Category{
-			{ID: "dresses", Name: "Платья", Subcategories: []model.Category{
-				{ID: "mini_dress", Name: "Мини платья"}, {ID: "midi_dress", Name: "Миди платья"},
-			}},
-			{ID: "jeans", Name: "Джинсы", Subcategories: []model.Category{
-				{ID: "skinny", Name: "Скинни"}, {ID: "wide_leg", Name: "Широкие"},
-			}},
-		}},
-		{ID: "shoes", Name: "Обувь", Subcategories: []model.Category{
-			{ID: "sneakers", Name: "Кроссовки"}, {ID: "boots", Name: "Сапоги"},
-		}},
-	}, nil
+	var categories []model.Category
+	// Загружаем только категории верхнего уровня (у которых нет родителя)
+	// и рекурсивно подгружаем их дочерние категории.
+	// Preload("Subcategories.Subcategories") - для 3 уровней вложенности.
+	err := r.db.WithContext(ctx).
+		Where("parent_id IS NULL").
+		Preload("Subcategories.Subcategories").
+		Order("name ASC").
+		Find(&categories).Error
+
+	return categories, err
 }
 
-// GetSizeChart (Заглушка)
-func (r *ProductRepository) GetSizeChart(ctx context.Context, category string) (*model.SizeChart, error) {
-	// В реальном приложении это будет запрос к таблице с размерными сетками
-	if category != "dresses" {
-		return nil, gorm.ErrRecordNotFound
-	}
-	return &model.SizeChart{
-		Category: "dresses",
-		Type: "clothing",
-		Sizes: []model.Size{
-			{Size: "S", Measurements: map[string]string{"bust": "84-88 см", "waist": "64-68 см"}, International: "34", US: "4-6"},
-			{Size: "M", Measurements: map[string]string{"bust": "88-92 см", "waist": "68-72 см"}, International: "36", US: "8-10"},
-		},
-	}, nil
+// GetSizeChart получает размерную сетку для указанной категории из базы данных.
+func (r *ProductRepository) GetSizeChart(ctx context.Context, categoryID string) (*model.SizeChart, error) {
+	var sizeChart model.SizeChart
+	// Ищем размерную сетку по ID категории и подгружаем все связанные размеры
+	err := r.db.WithContext(ctx).
+		Preload("Sizes").
+		Where("category_id = ?", categoryID).
+		First(&sizeChart).Error
+
+	// gorm.ErrRecordNotFound - стандартная ошибка, если запись не найдена,
+	// ее удобно обрабатывать в сервисном слое для ответа 404 Not Found.
+	return &sizeChart, err
 }

@@ -65,11 +65,13 @@ func Init(cfg *config.Config) (*Server, error) {
 	productRepo := repository.NewProductRepository(db)
 	orderRepo := repository.NewOrderRepository(db)
 	dashboardRepo := repository.NewDashboardRepository(db)
+	analyticsRepo := repository.NewAnalyticsRepository(db)
 
 	userHandler := handler.NewUserHandler(userRepo)
 	productHandler := handler.NewProductHandler(productRepo)
 	orderHandler := handler.NewOrderHandler(orderRepo)
 	dashboardHandler := handler.NewDashboardHandler(dashboardRepo)
+	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo)
 
 	// Создаем одну родительскую группу /api
 	api := r.Group("/api")
@@ -144,6 +146,14 @@ func Init(cfg *config.Config) (*Server, error) {
 			{
 				dashboard.GET("/stats", dashboardHandler.GetStats)
 				dashboard.GET("/sales-chart", dashboardHandler.GetSalesChart)
+			}
+			analytics := protected.Group("/analytics")
+			{
+				analytics.GET("/top-products", analyticsHandler.GetTopProducts)
+				analytics.GET("/categories", analyticsHandler.GetCategoryAnalytics)
+				analytics.GET("/size-distribution", analyticsHandler.GetSizeDistribution)
+				analytics.GET("/seasonal-trends", analyticsHandler.GetSeasonalTrends)
+				analytics.GET("/returns", analyticsHandler.GetReturnsAnalytics)
 			}
 		}
 	}
