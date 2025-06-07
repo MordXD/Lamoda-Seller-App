@@ -14,7 +14,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
-//	"github.com/lamoda-seller-app/internal/config"
+	"github.com/lamoda-seller-app/internal/config"
 	"github.com/lamoda-seller-app/internal/handler"
 	"github.com/lamoda-seller-app/internal/middleware"
 	"github.com/lamoda-seller-app/internal/repository"
