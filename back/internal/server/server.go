@@ -62,6 +62,8 @@ func Init(cfg *config.Config) (*Server, error) {
 	// Initialize repositories and handlers
 	userRepo := repository.NewUserRepository(db)
 	productRepo := repository.NewProductRepository(db)
+	orderRepo := repository.NewOrderRepository(db)
+	orderHandler := handler.NewOrderHandler(orderRepo)
 	productHandler := handler.NewProductHandler(productRepo)
 	userHandler := handler.NewUserHandler(userRepo)
 
@@ -129,6 +131,13 @@ func Init(cfg *config.Config) (*Server, error) {
 
 				// Операции с изображениями товара
 				products.POST("/:id/images", productHandler.UploadImages) // POST /api/products/{id}/images
+			}
+			// --- ДОБАВЛЕНО: Маршруты для заказов ---
+			orders := protected.Group("/orders")
+			{
+				orders.GET("", orderHandler.ListOrders)                         // GET /api/orders
+				orders.GET("/:order_id", orderHandler.GetOrderByID)             // GET /api/orders/{order_id}
+				orders.PUT("/:order_id/status", orderHandler.UpdateOrderStatus) // PUT /api/orders/{order_id}/status
 			}
 		}
 	}
