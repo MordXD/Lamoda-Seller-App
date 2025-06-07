@@ -1,30 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import SalesChart from '../components/SalesChart';
 import TabBar from '../components/TabBar';
-
-interface SalesData {
-  date: string;
-  orders: number;
-  purchases: number;
-}
+import { useDashboard } from '../hooks/useDashboard';
+import type { AnalyticsFilters } from '../types/dashboard';
 
 export default function DashboardPage() {
-  const [isLoading, setIsLoading] = useState(true);
   const [selectedDay, setSelectedDay] = useState(4); // Сегодня - четверг (04)
   const [chartMode, setChartMode] = useState<'orders' | 'purchases'>('orders');
-  const [dashboardData, setDashboardData] = useState<{
-    todayAmount: number;
-    todayAmountChange: number;
-    todayOrders: number;
-    todayOrdersChange: number;
-    salesData: SalesData[];
-  }>({
-    todayAmount: 0,
-    todayAmountChange: 0,
-    todayOrders: 0,
-    todayOrdersChange: 0,
-    salesData: []
-  });
+  const [filters] = useState<AnalyticsFilters>({ period: 'today' });
+
+  const { dashboardData, isLoading, error, refetch } = useDashboard(filters);
 
   const weekDays = [
     { short: 'пн', full: 'понедельник', date: '02' },
@@ -36,27 +21,16 @@ export default function DashboardPage() {
     { short: 'вс', full: 'воскресенье', date: '08' }
   ];
 
-  useEffect(() => {
-    // Имитация загрузки данных
-    setTimeout(() => {
-      setDashboardData({
-        todayAmount: 121200,
-        todayAmountChange: 12.89,
-        todayOrders: 120,
-        todayOrdersChange: 8,
-        salesData: [
-          { date: '14.05', orders: 85000, purchases: 78000 },
-          { date: '15.05', orders: 92000, purchases: 85000 },
-          { date: '16.05', orders: 78000, purchases: 72000 },
-          { date: '17.05', orders: 105000, purchases: 95000 },
-          { date: '18.05', orders: 120000, purchases: 110000 },
-          { date: '19.05', orders: 135000, purchases: 125000 },
-          { date: '20.05', orders: 125000, purchases: 115000 }
-        ]
-      });
-      setIsLoading(false);
-    }, 1000);
-  }, []);
+  const handleDaySelect = (dayIndex: number) => {
+    setSelectedDay(dayIndex);
+    // Здесь можно добавить логику для изменения фильтров по дате
+    // const selectedDate = weekDays[dayIndex];
+    // setFilters({ ...filters, date_from: selectedDate.date });
+  };
+
+  const handleRefresh = () => {
+    refetch(filters);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -89,7 +63,7 @@ export default function DashboardPage() {
           {weekDays.map((day, index) => (
             <button
               key={index}
-              onClick={() => setSelectedDay(index)}
+              onClick={() => handleDaySelect(index)}
               className={`flex flex-col items-center p-2 rounded-lg transition-colors ${
                 selectedDay === index 
                   ? 'bg-black text-white' 
@@ -105,44 +79,75 @@ export default function DashboardPage() {
 
       {/* Content */}
       <div className="px-4 py-6 space-y-6">
+        {/* Error State */}
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-600 text-sm">{error}</p>
+            <button
+              onClick={handleRefresh}
+              className="mt-2 text-red-700 text-sm font-medium hover:text-red-800"
+            >
+              Попробовать снова
+            </button>
+          </div>
+        )}
+
         {/* Main KPIs */}
         <div className="space-y-4">
           {/* Amount KPI */}
           <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-            <div className="flex items-baseline space-x-2 mb-2">
-              <span className="text-3xl font-bold text-gray-900">
-                {dashboardData.todayAmount.toLocaleString('ru-RU')}
-              </span>
-              <span className="text-lg text-gray-600">₽</span>
-              <div className="flex items-center space-x-1 ml-4">
-                <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                </svg>
-                <span className="text-sm font-medium text-green-600">
-                  + {dashboardData.todayAmountChange}%
-                </span>
+            {isLoading ? (
+              <div className="animate-pulse">
+                <div className="h-8 bg-gray-200 rounded w-1/2 mb-2"></div>
+                <div className="h-4 bg-gray-200 rounded w-1/3"></div>
               </div>
-            </div>
-            <p className="text-sm text-gray-500">Заказали на сумму</p>
+            ) : (
+              <>
+                <div className="flex items-baseline space-x-2 mb-2">
+                  <span className="text-3xl font-bold text-gray-900">
+                    {dashboardData?.stats.revenue.today.toLocaleString('ru-RU') || 0}
+                  </span>
+                  <span className="text-lg text-gray-600">₽</span>
+                  <div className="flex items-center space-x-1 ml-4">
+                    <svg className={`w-4 h-4 ${(dashboardData?.stats.revenue.change_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`} fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d={`${(dashboardData?.stats.revenue.change_percent || 0) >= 0 ? 'M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z' : 'M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 112 0v11.586l2.293-2.293a1 1 0 011.414 0z'}`} clipRule="evenodd" />
+                    </svg>
+                    <span className={`text-sm font-medium ${(dashboardData?.stats.revenue.change_percent || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(dashboardData?.stats.revenue.change_percent || 0) >= 0 ? '+' : ''} {dashboardData?.stats.revenue.change_percent || 0}%
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-500">Заказали на сумму</p>
+              </>
+            )}
           </div>
 
           {/* Orders KPI */}
           <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
-            <div className="flex items-baseline space-x-2 mb-2">
-              <span className="text-3xl font-bold text-gray-900">
-                {dashboardData.todayOrders}
-              </span>
-              <span className="text-lg text-gray-600">шт.</span>
-              <div className="flex items-center space-x-1 ml-4">
-                <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                </svg>
-                <span className="text-sm font-medium text-green-600">
-                  + {dashboardData.todayOrdersChange}шт.
-                </span>
+            {isLoading ? (
+              <div className="animate-pulse">
+                <div className="h-8 bg-gray-200 rounded w-1/2 mb-2"></div>
+                <div className="h-4 bg-gray-200 rounded w-1/3"></div>
               </div>
-            </div>
-            <p className="text-sm text-gray-500">Кол-во товаров</p>
+            ) : (
+              <>
+                <div className="flex items-baseline space-x-2 mb-2">
+                  <span className="text-3xl font-bold text-gray-900">
+                    {dashboardData?.stats.orders.today || 0}
+                  </span>
+                  <span className="text-lg text-gray-600">шт.</span>
+                  <div className="flex items-center space-x-1 ml-4">
+                    <svg className={`w-4 h-4 ${(dashboardData?.stats.orders.change_count || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`} fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d={`${(dashboardData?.stats.orders.change_count || 0) >= 0 ? 'M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z' : 'M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 112 0v11.586l2.293-2.293a1 1 0 011.414 0z'}`} clipRule="evenodd" />
+                    </svg>
+                    <span className={`text-sm font-medium ${(dashboardData?.stats.orders.change_count || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(dashboardData?.stats.orders.change_count || 0) >= 0 ? '+' : ''} {dashboardData?.stats.orders.change_count || 0}шт.
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-500">Кол-во товаров</p>
+              </>
+            )}
           </div>
         </div>
 
@@ -185,7 +190,7 @@ export default function DashboardPage() {
             
             <div className="ml-12 h-full">
               <SalesChart
-                data={dashboardData.salesData}
+                data={dashboardData?.sales_chart || []}
                 isLoading={isLoading}
               />
             </div>
@@ -198,11 +203,44 @@ export default function DashboardPage() {
               <span className="text-sm text-gray-600">Заказали</span>
             </div>
             <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+              <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
               <span className="text-sm text-gray-600">Выкупили</span>
             </div>
           </div>
         </div>
+
+        {/* Recent Orders */}
+        {dashboardData?.recent_orders && dashboardData.recent_orders.length > 0 && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100">
+            <div className="p-4 border-b border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900">Последние заказы</h2>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {dashboardData.recent_orders.slice(0, 5).map((order) => (
+                <div key={order.id} className="p-4 hover:bg-gray-50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {order.order_number}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {order.customer_name}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-gray-900">
+                        {order.amount.toLocaleString('ru-RU')} ₽
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {order.status}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <TabBar />

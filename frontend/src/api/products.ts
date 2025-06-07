@@ -1,6 +1,5 @@
 import apiClient from './axios';
 import type { 
-  Product, 
   ProductDetail, 
   ProductsResponse, 
   ProductsFilters, 
@@ -51,7 +50,7 @@ export const uploadProductImages = async (
 ): Promise<{ message: string; images: any[] }> => {
   const formData = new FormData();
   
-  files.forEach((file, index) => {
+  files.forEach((file) => {
     formData.append('files', file);
   });
   
@@ -73,8 +72,61 @@ export const getCategories = async (): Promise<CategoriesResponse> => {
   return response.data;
 };
 
-// Удаление товара (если есть такой эндпоинт)
+// Получение размерной сетки
+export const getSizeChart = async (category: string): Promise<any> => {
+  const response = await apiClient.get(`/api/products/sizes?category=${category}`);
+  return response.data;
+};
+
+// Удаление товара
 export const deleteProduct = async (productId: string): Promise<{ message: string }> => {
   const response = await apiClient.delete(`/api/products/${productId}`);
+  return response.data;
+};
+
+// Обновление статуса товара (активный/неактивный)
+export const updateProductStatus = async (productId: string, status: 'active' | 'inactive' | 'draft'): Promise<{ message: string }> => {
+  const response = await apiClient.patch(`/api/products/${productId}/status`, { status });
+  return response.data;
+};
+
+// Массовое обновление товаров
+export const bulkUpdateProducts = async (productIds: string[], updates: Partial<CreateProductData>): Promise<{ message: string; updated_count: number }> => {
+  const response = await apiClient.patch('/api/products/bulk', { product_ids: productIds, updates });
+  return response.data;
+};
+
+// Экспорт товаров в CSV/Excel
+export const exportProducts = async (filters?: ProductsFilters, format: 'csv' | 'excel' = 'csv'): Promise<Blob> => {
+  const params = new URLSearchParams();
+  
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        params.append(key, value.toString());
+      }
+    });
+  }
+  
+  params.append('format', format);
+  
+  const response = await apiClient.get(`/api/products/export?${params.toString()}`, {
+    responseType: 'blob',
+  });
+  
+  return response.data;
+};
+
+// Импорт товаров из CSV/Excel
+export const importProducts = async (file: File): Promise<{ message: string; imported_count: number; errors?: string[] }> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await apiClient.post('/api/products/import', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  
   return response.data;
 }; 

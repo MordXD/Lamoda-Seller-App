@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import apiClient from '../api/axios';
+import { login as apiLogin } from '../api/auth';
 import type { Account, AuthContextType } from '../types/auth';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -64,47 +64,46 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     console.log('Инициализация AuthContext завершена');
   }, []);
 
-  const login = async (email: string, password: string): Promise<void> => {
+  const login = async (usernameOrEmail: string, password: string): Promise<void> => {
     setIsLoading(true);
     try {
-      console.log('Отправляем запрос на авторизацию:', { email });
+      console.log('Отправляем запрос на авторизацию:', { username_or_email: usernameOrEmail });
       
-      const response = await apiClient.post('/api/auth/login', {
-        email,
-        password,
-      });
+      const response = await apiLogin({ username_or_email: usernameOrEmail, password });
       
       console.log('Ответ сервера:', response);
-      console.log('Данные ответа:', response.data);
-      console.log('Статус ответа:', response.status);
       
-      // Сервер возвращает { token: "..." }, а не { accessToken: "...", user: {...} }
-      const { token } = response.data;
+      const { token, user } = response;
       
       if (!token) {
-        console.error('Токен отсутствует в ответе сервера:', response.data);
+        console.error('Токен отсутствует в ответе сервера:', response);
         throw new Error('Токен не получен от сервера');
       }
       
       console.log('Получен токен:', token);
+      console.log('Данные пользователя:', user);
       
-      // Создаем новый аккаунт с минимальными данными
+      // Создаем новый аккаунт с данными от сервера
       const newAccount: Account = {
-        id: uuidv4(),
-        shopName: email, // Используем email как shopName, пока нет других данных
+        id: user?.id || uuidv4(),
+        shopName: user?.shop_name || user?.name || usernameOrEmail,
         token: token,
-        user: {
-          id: uuidv4(), // Временный ID
-          email: email,
-          shopName: email,
+        user: user ? {
+          id: user.id,
+          email: user.email,
+          shopName: user.shop_name || user.name,
+        } : {
+          id: uuidv4(),
+          email: usernameOrEmail,
+          shopName: usernameOrEmail,
         },
       };
       
       console.log('Создан новый аккаунт:', newAccount);
       
-      // Проверяем, есть ли уже такой аккаунт
+      // Проверяем, есть ли уже такой аккаунт (по email или ID)
       const existingAccountIndex = accounts.findIndex(
-        acc => acc.user?.email === email
+        acc => acc.user?.email === user?.email || acc.user?.id === user?.id
       );
       
       let updatedAccounts: Account[];
