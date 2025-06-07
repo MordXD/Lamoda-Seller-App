@@ -1,24 +1,22 @@
-version: "3.8"
-
 services:
-  app:
+  lamoda-app:
     build:
       context: ./back
       dockerfile: Dockerfile
-    container_name: kanban_app
+    container_name: lamoda_seller_app
     restart: always
     depends_on:
-      migrate:
+      lamoda-migrate:
         condition: service_completed_successfully
     env_file:
       - ./back/.env
     environment:
-      - DB_HOST=db
+      - DB_HOST=lamoda-db
       - DB_PORT=5432
     ports:
       - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
     networks:
-      - kanban_network
+      - lamoda_network
 
   frontend:
     build:
@@ -27,20 +25,20 @@ services:
     container_name: kanban_frontend
     restart: always
     ports:
-      - "3000:80"
+      - "3080:80"
     networks:
-      - kanban_network
+      - lamoda_network
 
-  db:
+  lamoda-db:
     image: postgres:15
-    container_name: kanban_db
+    container_name: lamoda_seller_db
     restart: always
     environment:
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - lamoda_db_data:/var/lib/postgresql/data
     ports:
       - "5431:5432"
     healthcheck:
@@ -49,28 +47,28 @@ services:
       timeout: 5s
       retries: 10
     networks:
-      - kanban_network
+      - lamoda_network
 
-  migrate:
+  lamoda-migrate:
     image: migrate/migrate:v4.16.2
     depends_on:
-      db:
+      lamoda-db:
         condition: service_healthy
     env_file:
       - .env
     volumes:
-      - ./migrations:/migrations
+      - ./back/migrations:/migrations
     command:
       - "-path=/migrations"
-      - "-database=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?sslmode=disable"
+      - "-database=postgres://${DB_USER}:${DB_PASSWORD}@lamoda-db:5432/${DB_NAME}?sslmode=disable"
       - "up"
     restart: "no"
     networks:
-      - kanban_network
+      - lamoda_network
 
 volumes:
-  db_data:
+  lamoda_db_data:
 
 networks:
-  kanban_network:
+  lamoda_network:
     driver: bridge
