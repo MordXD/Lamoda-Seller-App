@@ -30,7 +30,7 @@ type Server struct {
 }
 
 func Init(cfg *config.Config) (*Server, error) {
-	// Setup GORM with proper configuration
+	// ... (код подключения к БД и миграции остается без изменений) ...
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=UTC",
 		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName,
 	)
@@ -42,7 +42,6 @@ func Init(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to connect to DB: %w", err)
 	}
 
-	// Configure connection pool
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
@@ -52,64 +51,69 @@ func Init(cfg *config.Config) (*Server, error) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// !!! ДОБАВЛЯЕМ НОВУЮ МОДЕЛЬ В МИГРАЦИЮ !!!
 	if err := db.AutoMigrate(&model.User{}, &model.AccountLink{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
 	log.Println("✅ Connected to database and migrated tables")
 
-	// Setup Gin
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.Default()
-
-	// Add CORS middleware with environment-based configuration
 	r.Use(corsMiddleware(cfg))
+	
+	// --- ИЗМЕНЕНИЕ ЛОГИКИ РОУТИНГА ---
 
-	// Health check endpoint
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":    "ok",
-			"timestamp": time.Now().UTC(),
-			"version":   "1.0.0",
-		})
-	})
-	// Initialize repositories
+	// Initialize repositories and handlers
 	userRepo := repository.NewUserRepository(db)
-
-	// Initialize handlers
 	userHandler := handler.NewUserHandler(userRepo)
 
-	// Public routes
-	auth := r.Group("/auth")
-	{
-		auth.POST("/register", userHandler.Register)
-		auth.POST("/login", userHandler.Login)
-		auth.POST("/validate-token", userHandler.ValidateToken)
-		auth.POST("/validate-tokens", userHandler.ValidateMultipleTokens)
-	}
-
-	// Protected routes
+	// Создаем одну родительскую группу /api
 	api := r.Group("/api")
-	api.Use(middleware.JWTAuthMiddleware())
 	{
-		// Profile
-		api.GET("/profile", userHandler.GetProfile)
-		api.PUT("/profile", userHandler.UpdateProfile)
+		// Health check endpoint внутри /api
+		api.GET("/health", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"status":    "ok",
+				"timestamp": time.Now().UTC(),
+				"version":   "1.0.0",
+			})
+		})
 
-		// Password
-		api.POST("/password/change", userHandler.ChangePassword)
-
-		// --- !!! НОВЫЕ МАРШРУТЫ ДЛЯ УПРАВЛЕНИЯ АККАУНТАМИ !!! ---
-		account := api.Group("/account")
+		// --- Public Routes ---
+		// Группа /auth теперь вложена в /api, создавая пути вида /api/auth/*
+		auth := api.Group("/auth")
 		{
-			account.POST("/link", userHandler.LinkAccount)
-			account.POST("/switch", userHandler.SwitchAccount)
-			account.GET("/links", userHandler.GetLinkedAccounts)
+			auth.POST("/register", userHandler.Register)
+			auth.POST("/login", userHandler.Login)
+			auth.POST("/validate-token", userHandler.ValidateToken)
+			auth.POST("/validate-tokens", userHandler.ValidateMultipleTokens)
+		}
+
+		// --- Protected Routes ---
+		// Эта группа тоже вложена в /api.
+		// Мы можем создать группу с пустым путем, чтобы применить middleware только к ней.
+		protected := api.Group("/")
+		protected.Use(middleware.JWTAuthMiddleware())
+		{
+			// Profile routes: /api/profile
+			protected.GET("/profile", userHandler.GetProfile)
+			protected.PUT("/profile", userHandler.UpdateProfile)
+
+			// Password routes: /api/password/change
+			protected.POST("/password/change", userHandler.ChangePassword)
+
+			// Account management routes: /api/account/*
+			account := protected.Group("/account")
+			{
+				account.POST("/link", userHandler.LinkAccount)
+				account.POST("/switch", userHandler.SwitchAccount)
+				account.GET("/links", userHandler.GetLinkedAccounts)
+			}
 		}
 	}
+
 
 	return &Server{
 		Engine: r,
@@ -119,16 +123,15 @@ func Init(cfg *config.Config) (*Server, error) {
 }
 
 func corsMiddleware(cfg *config.Config) gin.HandlerFunc {
+	// ... (код corsMiddleware без изменений)
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 
-		// Get allowed origins from environment
 		allowedOrigins := strings.Split(os.Getenv("CORS_ORIGINS"), ",")
 		if len(allowedOrigins) == 0 || allowedOrigins[0] == "" {
 			allowedOrigins = []string{"http://localhost:3000"}
 		}
 
-		// Check if origin is allowed
 		originAllowed := false
 		for _, allowedOrigin := range allowedOrigins {
 			if strings.TrimSpace(allowedOrigin) == origin {
@@ -162,20 +165,6 @@ func (s *Server) Run() {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-
-	go func() {
-		log.Printf("🚀 Server running on port %s", s.Config.ServerPort)
-		log.Printf("📚 API endpoints available:")
-		log.Printf("   POST /auth/register - User registration")
-		log.Printf("   POST /auth/login - User login")
-		log.Printf("   GET  /api/profile - Get user profile (protected)")
-		log.Printf("   PUT  /api/profile - Update user profile (protected)")
-		log.Printf("   GET  /health - Health check")
-
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to listen: %s", err)
-		}
-	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
