@@ -52,8 +52,8 @@ func Init(cfg *config.Config) (*Server, error) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// Auto-migrate database tables
-	if err := db.AutoMigrate(&model.User{}); err != nil {
+	// !!! ДОБАВЛЯЕМ НОВУЮ МОДЕЛЬ В МИГРАЦИЮ !!!
+	if err := db.AutoMigrate(&model.User{}, &model.AccountLink{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
@@ -91,14 +91,24 @@ func Init(cfg *config.Config) (*Server, error) {
 		auth.POST("/validate-tokens", userHandler.ValidateMultipleTokens)
 	}
 
-	// Protected routes - группа теперь называется `api`, а не `authorized`
+	// Protected routes
 	api := r.Group("/api")
 	api.Use(middleware.JWTAuthMiddleware())
 	{
+		// Profile
 		api.GET("/profile", userHandler.GetProfile)
 		api.PUT("/profile", userHandler.UpdateProfile)
-		// !!! НОВЫЙ МАРШРУТ ДЛЯ СМЕНЫ ПАРОЛЯ !!!
+
+		// Password
 		api.POST("/password/change", userHandler.ChangePassword)
+
+		// --- !!! НОВЫЕ МАРШРУТЫ ДЛЯ УПРАВЛЕНИЯ АККАУНТАМИ !!! ---
+		account := api.Group("/account")
+		{
+			account.POST("/link", userHandler.LinkAccount)
+			account.POST("/switch", userHandler.SwitchAccount)
+			account.GET("/links", userHandler.GetLinkedAccounts)
+		}
 	}
 
 	return &Server{

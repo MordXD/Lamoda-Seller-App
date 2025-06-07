@@ -55,6 +55,15 @@ type UpdateProfileRequest struct {
 	Name string `json:"name" binding:"required"`
 }
 
+type LinkAccountRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
+
+type SwitchAccountRequest struct {
+	TargetUserID uuid.UUID `json:"target_user_id" binding:"required"`
+}
+
 // --- Хендлеры ---
 
 func (h *UserHandler) Register(c *gin.Context) {
@@ -222,4 +231,82 @@ func (h *UserHandler) ValidateToken(c *gin.Context) {
 
 func (h *UserHandler) ValidateMultipleTokens(c *gin.Context) {
 	c.JSON(http.StatusNotImplemented, gin.H{"message": "not implemented"})
+}
+
+// LinkAccount - привязывает другой аккаунт к текущему аутентифицированному.
+// Требует ввода пароля от привязываемого аккаунта для подтверждения владения.
+func (h *UserHandler) LinkAccount(c *gin.Context) {
+	var req LinkAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
+		return
+	}
+
+	primaryUserID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+
+	// Находим аккаунт, который хотим привязать
+	linkedUser, err := h.repo.GetByEmail(c.Request.Context(), req.Email)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "account to link not found"})
+		return
+	}
+
+	// Проверяем пароль от привязываемого аккаунта
+	if err := bcrypt.CompareHashAndPassword([]byte(linkedUser.HashedPassword), []byte(req.Password)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials for the account to be linked"})
+		return
+	}
+
+	// Создаем связь
+	if err := h.repo.LinkAccounts(c.Request.Context(), primaryUserID, linkedUser.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to link accounts"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "account linked successfully"})
+}
+
+// SwitchAccount - выполняет переключение на привязанный аккаунт.
+func (h *UserHandler) SwitchAccount(c *gin.Context) {
+	var req SwitchAccountRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
+		return
+	}
+
+	currentUserID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+	targetUserID := req.TargetUserID
+
+	// Проверяем, разрешено ли переключение
+	isAllowed, err := h.repo.CheckAccountLink(c.Request.Context(), currentUserID, targetUserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		return
+	}
+	if !isAllowed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "switching to this account is not allowed"})
+		return
+	}
+
+	// Генерируем новый токен для целевого пользователя
+	token, err := auth.GenerateJWT(targetUserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
+		return
+	}
+
+	c.JSON(http.StatusOK, LoginResponse{Token: token})
+}
+
+// GetLinkedAccounts - возвращает список аккаунтов, доступных для переключения.
+func (h *UserHandler) GetLinkedAccounts(c *gin.Context) {
+	primaryUserID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+
+	accounts, err := h.repo.GetLinkedAccounts(c.Request.Context(), primaryUserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve linked accounts"})
+		return
+	}
+
+	c.JSON(http.StatusOK, accounts)
 }
