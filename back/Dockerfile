@@ -15,7 +15,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o kanban ./cmd/server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o lamoda-seller-app ./cmd/main.go
 
 # Final stage
 FROM alpine:3.21
@@ -27,7 +27,7 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 
 # Copy the binary from the build stage
-COPY --from=builder /app/kanban .
+COPY --from=builder /app/lamoda-seller-app .
 
 # Create directories for any necessary files
 RUN mkdir -p /app/data
@@ -36,4 +36,4 @@ RUN mkdir -p /app/data
 EXPOSE 8080
 
 # Run the application
-CMD ["./kanban"]
+CMD ["./lamoda-seller-app"]
