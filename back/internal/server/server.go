@@ -30,7 +30,6 @@ type Server struct {
 }
 
 func Init(cfg *config.Config) (*Server, error) {
-	// ... (код подключения к БД и миграции остается без изменений) ...
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=UTC",
 		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName,
 	)
@@ -51,17 +50,21 @@ func Init(cfg *config.Config) (*Server, error) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// Добавляем новые модели продукта в миграцию
+	// --- ИЗМЕНЕНИЕ: Обновляем миграцию под новые модели продуктов ---
+	// Убираем старые PricePoint и ProductSales, добавляем ProductImage и Supplier.
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.AccountLink{},
 		&model.Product{},
 		&model.ProductVariant{},
-		&model.PricePoint{},
-		&model.ProductSales{},
+		&model.ProductImage{},
+		&model.Supplier{},
 	); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
+	// Убедитесь, что в вашей БД включено расширение для UUID:
+	// CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+	db.Exec(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
 
 	log.Println("✅ Connected to database and migrated tables")
 
@@ -70,6 +73,8 @@ func Init(cfg *config.Config) (*Server, error) {
 	}
 	r := gin.Default()
 	r.Use(corsMiddleware(cfg))
+	// Роут для статических файлов (загруженных изображений)
+	r.Static("/uploads", "./uploads")
 
 	// Initialize repositories and handlers
 	userRepo := repository.NewUserRepository(db)
@@ -90,7 +95,6 @@ func Init(cfg *config.Config) (*Server, error) {
 		})
 
 		// --- Public Routes ---
-		// Группа /auth теперь вложена в /api, создавая пути вида /api/auth/*
 		auth := api.Group("/auth")
 		{
 			auth.POST("/register", userHandler.Register)
@@ -121,27 +125,27 @@ func Init(cfg *config.Config) (*Server, error) {
 			// Маршруты для баланса
 			balance := protected.Group("/balance")
 			{
-				balance.GET("", userHandler.GetBalance)                // Получить текущий баланс
-				balance.POST("/add", userHandler.AddBalance)           // Пополнить баланс
-				balance.POST("/withdraw", userHandler.WithdrawBalance) // Снять с баланса
+				balance.GET("", userHandler.GetBalance)
+				balance.POST("/add", userHandler.AddBalance)
+				balance.POST("/withdraw", userHandler.WithdrawBalance)
 			}
 
-			// --- !!! ДОБАВЛЕНЫ МАРШРУТЫ ПРОДУКТОВ ДЛЯ ПРОДАВЦА !!! ---
-			seller := protected.Group("/seller")
+			// --- !!! ИЗМЕНЕНИЕ: Заменяем старые маршруты продуктов на новые в соответствии с ТЗ !!! ---
+			products := protected.Group("/products")
 			{
-				products := seller.Group("/products")
-				{
-					// CRUD операции для продуктов
-					products.GET("", productHandler.ListProducts)       // GET /api/seller/products
-					products.POST("", productHandler.CreateProduct)     // POST /api/seller/products
-					products.GET("/:id", productHandler.GetProductByID) // GET /api/seller/products/123
-					products.PUT("/:id", productHandler.UpdateProduct)  // PUT /api/seller/products/123
-					products.DELETE("/:id", productHandler.DeleteProduct) // DELETE /api/seller/products/123
+				// Получение списков и справочников
+				products.GET("", productHandler.ListProducts)           // GET /api/products
+				products.GET("/categories", productHandler.GetCategories) // GET /api/products/categories
+				products.GET("/sizes", productHandler.GetSizeChart)       // GET /api/products/sizes
 
-					// Дополнительные роуты для статистики и истории
-					products.GET("/:id/stats", productHandler.GetSalesStats)         // GET /api/seller/products/123/stats
-					products.GET("/:id/price-history", productHandler.GetPriceHistory) // GET /api/seller/products/123/price-history
-				}
+				// CRUD операции для конкретного товара
+				products.POST("", productHandler.CreateProduct)     // POST /api/products
+				products.GET("/:id", productHandler.GetProductByID) // GET /api/products/{id}
+				products.PUT("/:id", productHandler.UpdateProduct)  // PUT /api/products/{id}
+				products.DELETE("/:id", productHandler.DeleteProduct) // DELETE /api/products/{id} (стандартный REST)
+
+				// Операции с изображениями товара
+				products.POST("/:id/images", productHandler.UploadImages) // POST /api/products/{id}/images
 			}
 		}
 	}

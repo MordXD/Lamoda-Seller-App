@@ -2,9 +2,10 @@ package repository
 
 import (
 	"context"
-	"errors"
-	"time"
+	"fmt"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/lamoda-seller-app/internal/model"
 	"gorm.io/gorm"
 )
@@ -18,158 +19,225 @@ func NewProductRepository(db *gorm.DB) *ProductRepository {
 	return &ProductRepository{db: db}
 }
 
-// GetAllParams определяет параметры для получения списка товаров (пагинация, фильтры).
-type GetAllProductsParams struct {
-	Limit  int
-	Offset int
-	// Сюда можно будет добавить поля для фильтрации и сортировки
+// ListProductsParams определяет все параметры для получения списка товаров.
+type ListProductsParams struct {
+	Search      string
+	Category    string
+	Brand       string
+	MinPrice    float64
+	MaxPrice    float64
+	StockStatus string
+	SortBy      string
+	SortOrder   string
+	Limit       int
+	Offset      int
 }
 
-// Create создает новый товар и его варианты в одной транзакции.
-func (r *ProductRepository) Create(ctx context.Context, product *model.Product) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Сначала создаем основной продукт
-		if err := tx.Create(product).Error; err != nil {
-			return err
-		}
-
-		// Если есть варианты, связываем их с созданным продуктом и создаем
-		if len(product.Variants) > 0 {
-			for i := range product.Variants {
-				product.Variants[i].ProductID = product.ID
-			}
-			if err := tx.Create(&product.Variants).Error; err != nil {
-				return err
-			}
-		}
-
-		// Добавляем текущую цену в историю цен
-		pricePoint := model.PricePoint{
-			ProductID: product.ID,
-			Date:      time.Now(),
-			Price:     product.Price,
-		}
-		if err := tx.Create(&pricePoint).Error; err != nil {
-			return err
-		}
-
-		return nil
-	})
+// FilterValues содержит данные для блока `filters` в ответе API.
+type FilterValues struct {
+	Categories  []FilterCount `json:"categories"`
+	Brands      []FilterCount `json:"brands"`
+	PriceRange  PriceRange    `json:"price_range"`
 }
 
-// GetAll возвращает список всех товаров с пагинацией.
-func (r *ProductRepository) GetAll(ctx context.Context, params GetAllProductsParams) ([]model.Product, int64, error) {
+type FilterCount struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
+type PriceRange struct {
+	Min float64 `json:"min"`
+	Max float64 `json:"max"`
+}
+
+// List возвращает список товаров с фильтрацией, сортировкой, пагинацией, а также данные для фильтров.
+func (r *ProductRepository) List(ctx context.Context, params ListProductsParams) ([]model.Product, int64, *FilterValues, error) {
 	var products []model.Product
 	var total int64
+	var filters FilterValues
 
+	// --- 1. Создаем базовый запрос с фильтрами ---
 	query := r.db.WithContext(ctx).Model(&model.Product{})
 
-	// Считаем общее количество для пагинации
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
+	if params.Search != "" {
+		searchQuery := "%" + strings.ToLower(params.Search) + "%"
+		query = query.Where("LOWER(name) LIKE ? OR LOWER(sku) LIKE ? OR LOWER(brand) LIKE ?", searchQuery, searchQuery, searchQuery)
+	}
+	if params.Category != "" {
+		query = query.Where("category = ?", params.Category)
+	}
+	if params.Brand != "" {
+		query = query.Where("brand = ?", params.Brand)
+	}
+	if params.MinPrice > 0 {
+		query = query.Where("price >= ?", params.MinPrice)
+	}
+	if params.MaxPrice > 0 {
+		query = query.Where("price <= ?", params.MaxPrice)
+	}
+	switch params.StockStatus {
+	case "in_stock":
+		query = query.Where("total_stock > 10") // Примерное значение "в наличии"
+	case "low_stock":
+		query = query.Where("total_stock > 0 AND total_stock <= 10")
+	case "out_of_stock":
+		query = query.Where("total_stock = 0")
 	}
 
-	// Применяем пагинацию и получаем сами товары
-	err := query.Offset(params.Offset).Limit(params.Limit).Order("created_at DESC").Find(&products).Error
-	return products, total, err
-}
-
-// GetByID возвращает товар по его ID, включая связанные варианты.
-func (r *ProductRepository) GetByID(ctx context.Context, id int) (*model.Product, error) {
-	var product model.Product
-	err := r.db.WithContext(ctx).Preload("Variants").First(&product, id).Error
+	// --- 2. Получаем данные для блока `filters` (до применения пагинации) ---
+	// Клонируем запрос, чтобы основные фильтры (кроме цены/категории/бренда) не влияли на подсчеты
+	// Здесь упрощенная логика: мы считаем фильтры на основе уже отфильтрованного набора.
+	// В реальном приложении это может быть сложнее.
+	err := r.calculateFilters(query.Session(&gorm.Session{}), &filters)
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, gorm.ErrRecordNotFound
-		}
-		return nil, err
+		return nil, 0, nil, fmt.Errorf("failed to calculate filters: %w", err)
 	}
-	return &product, nil
+
+
+	// --- 3. Считаем общее количество для пагинации ---
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, nil, err
+	}
+
+	// --- 4. Применяем сортировку ---
+	if params.SortBy != "" {
+		// Валидация, чтобы избежать SQL-инъекций
+		allowedSorts := map[string]string{
+			"name": "name", "price": "price", "stock": "total_stock",
+			"sales": "sales_count_30d", // Потребует JOIN или хранимое поле
+			"created_date": "created_at",
+		}
+		dbColumn, ok := allowedSorts[params.SortBy]
+		if ok {
+			order := "ASC"
+			if strings.ToLower(params.SortOrder) == "desc" {
+				order = "DESC"
+			}
+			query = query.Order(fmt.Sprintf("%s %s", dbColumn, order))
+		}
+	} else {
+		query = query.Order("created_at DESC") // Сортировка по умолчанию
+	}
+
+	// --- 5. Применяем пагинацию и получаем товары ---
+	// Preload для загрузки изображений, чтобы найти главное
+	err = query.Preload("Images").Offset(params.Offset).Limit(params.Limit).Find(&products).Error
+	if err != nil {
+		return nil, 0, nil, err
+	}
+
+	return products, total, &filters, nil
 }
 
-// Update обновляет информацию о товаре.
-// Внимание: эта реализация заменяет все варианты товара на новые.
+
+// calculateFilters вычисляет доступные фильтры на основе текущего запроса.
+func (r *ProductRepository) calculateFilters(query *gorm.DB, filters *FilterValues) error {
+	// Категории
+	rows, err := query.Select("category as id, category as name, count(*) as count").Group("category").Rows()
+	if err != nil { return err }
+	defer rows.Close()
+	for rows.Next() {
+		var cat FilterCount
+		if err := r.db.ScanRows(rows, &cat); err == nil {
+			filters.Categories = append(filters.Categories, cat)
+		}
+	}
+
+	// Бренды
+	rows, err = query.Select("brand as id, brand as name, count(*) as count").Group("brand").Rows()
+	if err != nil { return err }
+	defer rows.Close()
+	for rows.Next() {
+		var brand FilterCount
+		if err := r.db.ScanRows(rows, &brand); err == nil {
+			filters.Brands = append(filters.Brands, brand)
+		}
+	}
+
+	// Диапазон цен
+	return query.Select("COALESCE(MIN(price), 0) as min, COALESCE(MAX(price), 0) as max").Row().Scan(&filters.PriceRange.Min, &filters.PriceRange.Max)
+}
+
+// GetByID возвращает товар по его ID со всеми связанными данными.
+func (r *ProductRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Product, error) {
+	var product model.Product
+	err := r.db.WithContext(ctx).
+		Preload("Images").
+		Preload("Variants").
+		Preload("Supplier").
+		First(&product, id).Error
+	return &product, err
+}
+
+// Create создает новый товар.
+func (r *ProductRepository) Create(ctx context.Context, product *model.Product) error {
+	// В реальном приложении логика расчета TotalStock и других полей
+	// должна быть в транзакции или в сервисе.
+	var totalStock int
+	for _, v := range product.Variants {
+		totalStock += v.Stock
+	}
+	product.TotalStock = totalStock
+	
+	return r.db.WithContext(ctx).Create(product).Error
+}
+
+// Update обновляет товар.
 func (r *ProductRepository) Update(ctx context.Context, product *model.Product) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Проверяем, изменилась ли цена, чтобы добавить запись в историю
-		var oldPrice float64
-		if err := tx.Model(&model.Product{}).Where("id = ?", product.ID).Select("price").Row().Scan(&oldPrice); err != nil {
-			return err
-		}
-
-		// Удаляем старые варианты
-		if err := tx.Where("product_id = ?", product.ID).Delete(&model.ProductVariant{}).Error; err != nil {
-			return err
-		}
-
-		// Сохраняем основные данные о товаре (включая, возможно, новую цену)
-		if err := tx.Save(product).Error; err != nil {
-			return err
-		}
-		
-		// Создаем новые варианты, если они есть
-		if len(product.Variants) > 0 {
-			for i := range product.Variants {
-				product.Variants[i].ProductID = product.ID
-			}
-			if err := tx.Create(&product.Variants).Error; err != nil {
-				return err
-			}
-		}
-
-		// Если цена изменилась, добавляем запись в историю
-		if oldPrice != product.Price {
-			pricePoint := model.PricePoint{
-				ProductID: product.ID,
-				Date:      time.Now(),
-				Price:     product.Price,
-			}
-			if err := tx.Create(&pricePoint).Error; err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-}
-
-// Delete удаляет товар по ID. Каскадное удаление позаботится о вариантах.
-func (r *ProductRepository) Delete(ctx context.Context, id int) error {
-	return r.db.WithContext(ctx).Delete(&model.Product{}, id).Error
-}
-
-// GetSalesStats возвращает статистику продаж за указанный период.
-func (r *ProductRepository) GetSalesStats(ctx context.Context, id int, period string) ([]model.ProductSales, error) {
-	var sales []model.ProductSales
-	var startDate time.Time
-	now := time.Now()
-
-	switch period {
-	case "day":
-		startDate = now.AddDate(0, 0, -1)
-	case "week":
-		startDate = now.AddDate(0, 0, -7)
-	case "month":
-		startDate = now.AddDate(0, -1, 0)
-	default:
-		// по умолчанию неделя
-		startDate = now.AddDate(0, 0, -7)
+	// Логика обновления может быть сложной (например, обновление вариантов)
+	// Здесь для простоты используется Save, который обновит все поля.
+	var totalStock int
+	for _, v := range product.Variants {
+		totalStock += v.Stock
 	}
-
-	err := r.db.WithContext(ctx).
-		Where("product_id = ? AND date >= ?", id, startDate).
-		Order("date ASC").
-		Find(&sales).Error
-
-	return sales, err
+	product.TotalStock = totalStock
+	
+	// Используем `Session` и `FullSave` для обновления ассоциаций
+	return r.db.WithContext(ctx).Session(&gorm.Session{FullSaveAssociations: true}).Save(product).Error
 }
 
-// GetPriceHistory возвращает историю изменения цен для товара.
-func (r *ProductRepository) GetPriceHistory(ctx context.Context, id int) ([]model.PricePoint, error) {
-	var history []model.PricePoint
-	err := r.db.WithContext(ctx).
-		Where("product_id = ?", id).
-		Order("date DESC").
-		Find(&history).Error
-	return history, err
+// Delete удаляет товар.
+func (r *ProductRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	// GORM автоматически удалит связанные записи (variants, images) если настроен foreign key constraint `onDelete:CASCADE`
+	return r.db.WithContext(ctx).Select("Variants", "Images").Delete(&model.Product{ID: id}).Error
+}
+
+// CreateImage создает запись об изображении для продукта.
+func (r *ProductRepository) CreateImage(ctx context.Context, image *model.ProductImage) error {
+    return r.db.WithContext(ctx).Create(image).Error
+}
+
+// GetCategories (Заглушка)
+func (r *ProductRepository) GetCategories(ctx context.Context) ([]model.Category, error) {
+	// В реальном приложении это будет запрос к таблице категорий
+	return []model.Category{
+		{ID: "clothing", Name: "Одежда", Subcategories: []model.Category{
+			{ID: "dresses", Name: "Платья", Subcategories: []model.Category{
+				{ID: "mini_dress", Name: "Мини платья"}, {ID: "midi_dress", Name: "Миди платья"},
+			}},
+			{ID: "jeans", Name: "Джинсы", Subcategories: []model.Category{
+				{ID: "skinny", Name: "Скинни"}, {ID: "wide_leg", Name: "Широкие"},
+			}},
+		}},
+		{ID: "shoes", Name: "Обувь", Subcategories: []model.Category{
+			{ID: "sneakers", Name: "Кроссовки"}, {ID: "boots", Name: "Сапоги"},
+		}},
+	}, nil
+}
+
+// GetSizeChart (Заглушка)
+func (r *ProductRepository) GetSizeChart(ctx context.Context, category string) (*model.SizeChart, error) {
+	// В реальном приложении это будет запрос к таблице с размерными сетками
+	if category != "dresses" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return &model.SizeChart{
+		Category: "dresses",
+		Type: "clothing",
+		Sizes: []model.Size{
+			{Size: "S", Measurements: map[string]string{"bust": "84-88 см", "waist": "64-68 см"}, International: "34", US: "4-6"},
+			{Size: "M", Measurements: map[string]string{"bust": "88-92 см", "waist": "68-72 см"}, International: "36", US: "8-10"},
+		},
+	}, nil
 }

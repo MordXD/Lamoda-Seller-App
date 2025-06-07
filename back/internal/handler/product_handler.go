@@ -2,10 +2,13 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
 	"gorm.io/gorm"
@@ -14,115 +17,87 @@ import (
 // ProductHandler обрабатывает HTTP запросы, связанные с продуктами.
 type ProductHandler struct {
 	repo *repository.ProductRepository
+	// В реальном приложении сюда бы добавился ImageService для загрузки файлов
 }
 
 func NewProductHandler(repo *repository.ProductRepository) *ProductHandler {
 	return &ProductHandler{repo: repo}
 }
 
-// --- Request/Response Structures ---
+// --- Структуры ответов API ---
 
-type CreateProductRequest struct {
-	Name        string                       `json:"name" binding:"required"`
-	Price       float64                      `json:"price" binding:"required,gt=0"`
-	OldPrice    float64                      `json:"old_price,omitempty"`
-	ImageURL    string                       `json:"image_url" binding:"omitempty,url"`
-	ShortDesc   string                       `json:"short_desc"`
-	FullDesc    string                       `json:"full_desc"`
-	BrandID     int                          `json:"brand_id"`
-	CategoryID  int                          `json:"category_id"`
-	InStock     int                          `json:"in_stock" binding:"gte=0"`
-	Tags        []string                     `json:"tags"`
-	Variants    []CreateProductVariantRequest `json:"variants"`
+type PaginationResponse struct {
+	Total   int64 `json:"total"`
+	Limit   int   `json:"limit"`
+	Offset  int   `json:"offset"`
+	HasNext bool  `json:"has_next"`
+	HasPrev bool  `json:"has_prev"`
 }
 
-type CreateProductVariantRequest struct {
-	Color   string `json:"color"`
-	Size    string `json:"size"`
-	SKU     string `json:"sku" binding:"required"`
-	InStock int    `json:"in_stock" binding:"gte=0"`
+type ListProductsAPIResponse struct {
+	Products   []model.Product          `json:"products"`
+	Pagination PaginationResponse       `json:"pagination"`
+	Filters    *repository.FilterValues `json:"filters"`
 }
 
-type ListProductsResponse struct {
-	Products []model.Product `json:"products"`
-	Total    int64           `json:"total"`
-	Page     int             `json:"page"`
-	PageSize int             `json:"page_size"`
-}
+// --- Обработчики ---
 
-// --- Handlers ---
-
-func (h *ProductHandler) CreateProduct(c *gin.Context) {
-	var req CreateProductRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
-		return
-	}
-
-	product := model.Product{
-		Name:       req.Name,
-		Price:      req.Price,
-		OldPrice:   req.OldPrice,
-		ImageURL:   req.ImageURL,
-		ShortDesc:  req.ShortDesc,
-		FullDesc:   req.FullDesc,
-		BrandID:    req.BrandID,
-		CategoryID: req.CategoryID,
-		InStock:    req.InStock,
-		Tags:       req.Tags,
-	}
-
-	for _, v := range req.Variants {
-		product.Variants = append(product.Variants, model.ProductVariant{
-			Color:   v.Color,
-			Size:    v.Size,
-			SKU:     v.SKU,
-			InStock: v.InStock,
-		})
-	}
-
-	if err := h.repo.Create(c.Request.Context(), &product); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create product: " + err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusCreated, product)
-}
-
+// ListProducts GET /api/products
 func (h *ProductHandler) ListProducts(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "10"))
+	// --- Парсинг параметров ---
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	minPrice, _ := strconv.ParseFloat(c.DefaultQuery("min_price", "0"), 64)
+	maxPrice, _ := strconv.ParseFloat(c.DefaultQuery("max_price", "0"), 64)
 
-	if page < 1 {
-		page = 1
+	if limit <= 0 || limit > 100 {
+		limit = 20
 	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 10
-	}
-
-	params := repository.GetAllProductsParams{
-		Limit:  pageSize,
-		Offset: (page - 1) * pageSize,
+	if offset < 0 {
+		offset = 0
 	}
 
-	products, total, err := h.repo.GetAll(c.Request.Context(), params)
+	params := repository.ListProductsParams{
+		Limit:       limit,
+		Offset:      offset,
+		Search:      c.Query("search"),
+		Category:    c.Query("category"),
+		Brand:       c.Query("brand"),
+		MinPrice:    minPrice,
+		MaxPrice:    maxPrice,
+		StockStatus: c.Query("stock_status"),
+		SortBy:      c.Query("sort_by"),
+		SortOrder:   c.DefaultQuery("sort_order", "asc"),
+	}
+
+	// --- Получение данных ---
+	products, total, filters, err := h.repo.List(c.Request.Context(), params)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve products"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve products: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, ListProductsResponse{
+	// --- Формирование ответа ---
+	response := ListProductsAPIResponse{
 		Products: products,
-		Total:    total,
-		Page:     page,
-		PageSize: pageSize,
-	})
+		Pagination: PaginationResponse{
+			Total:   total,
+			Limit:   limit,
+			Offset:  offset,
+			HasNext: total > int64(limit+offset),
+			HasPrev: offset > 0,
+		},
+		Filters: filters,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
+// GetProductByID GET /api/products/{id}
 func (h *ProductHandler) GetProductByID(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID format"})
 		return
 	}
 
@@ -132,112 +107,202 @@ func (h *ProductHandler) GetProductByID(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error: " + err.Error()})
 		return
 	}
+
+	// Запуск хука AfterFind произойдет автоматически в GORM
+	// Если нужны дополнительные вычисления (статистика продаж), их нужно делать здесь,
+	// вызывая другие методы репозитория/сервиса.
 
 	c.JSON(http.StatusOK, product)
 }
 
-func (h *ProductHandler) UpdateProduct(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
-		return
-	}
-
-	var req CreateProductRequest
+// CreateProduct POST /api/products
+func (h *ProductHandler) CreateProduct(c *gin.Context) {
+	var req model.Product
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
 		return
 	}
 
-	// Убедимся, что товар существует
-	if _, err := h.repo.GetByID(c.Request.Context(), id); err != nil {
+	// req.ID будет нулевым, GORM сгенерирует новый UUID
+	req.ID = uuid.New() // Явно генерируем, чтобы вернуть в ответе
+
+	if err := h.repo.Create(c.Request.Context(), &req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create product: " + err.Error()})
+		return
+	}
+
+	// Получаем созданный товар со всеми полями для ответа
+	createdProduct, err := h.repo.GetByID(c.Request.Context(), req.ID)
+	if err != nil {
+		// Даже если товар создан, но не можем его получить, это ошибка
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve created product: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"id":      createdProduct.ID,
+		"message": "Товар успешно создан",
+		"product": createdProduct,
+	})
+}
+
+// UpdateProduct PUT /api/products/{id}
+func (h *ProductHandler) UpdateProduct(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID format"})
+		return
+	}
+
+	// Сначала получаем существующий товар
+	product, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error: " + err.Error()})
 		return
 	}
-	
-	product := model.Product{
-		ID:         id, // Важно установить ID для обновления
-		Name:       req.Name,
-		Price:      req.Price,
-		OldPrice:   req.OldPrice,
-		ImageURL:   req.ImageURL,
-		ShortDesc:  req.ShortDesc,
-		FullDesc:   req.FullDesc,
-		BrandID:    req.BrandID,
-		CategoryID: req.CategoryID,
-		InStock:    req.InStock,
-		Tags:       req.Tags,
+
+	// Привязываем JSON к СУЩЕСТВУЮЩЕМУ объекту.
+	// Это обновит только те поля, которые пришли в запросе.
+	if err := c.ShouldBindJSON(&product); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
+		return
 	}
 
-	for _, v := range req.Variants {
-		product.Variants = append(product.Variants, model.ProductVariant{
-			Color:   v.Color,
-			Size:    v.Size,
-			SKU:     v.SKU,
-			InStock: v.InStock,
-		})
-	}
-	
-	if err := h.repo.Update(c.Request.Context(), &product); err != nil {
+	// ID не должен меняться
+	product.ID = id
+
+	if err := h.repo.Update(c.Request.Context(), product); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update product: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "product updated successfully"})
+	// Получаем обновленный продукт для ответа
+	updatedProduct, _ := h.repo.GetByID(c.Request.Context(), id)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Товар успешно обновлен",
+		"product": updatedProduct,
+	})
 }
 
+// --- НОВЫЙ ОБРАБОТЧИК ---
+// DeleteProduct DELETE /api/products/{id}
 func (h *ProductHandler) DeleteProduct(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID format"})
 		return
 	}
 
+	// Перед удалением можно проверить, существует ли товар, чтобы вернуть 404,
+	// но DELETE к несуществующему ресурсу часто считают идемпотентной операцией.
+	// Здесь мы просто пытаемся удалить.
 	if err := h.repo.Delete(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete product"})
+		// Ошибка может возникнуть, например, из-за проблем с подключением к БД.
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete product: " + err.Error()})
 		return
 	}
 
-	c.Status(http.StatusNoContent)
+	// Успешный ответ на DELETE - это 204 No Content с пустым телом.
+	// Можно также вернуть 200 OK с сообщением.
+	c.JSON(http.StatusOK, gin.H{"message": "Товар успешно удален"})
+	// или c.Status(http.StatusNoContent)
 }
 
-func (h *ProductHandler) GetSalesStats(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+// UploadImages POST /api/products/{id}/images
+func (h *ProductHandler) UploadImages(c *gin.Context) {
+	productID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID format"})
 		return
 	}
 
-	period := c.DefaultQuery("period", "week")
-	
-	stats, err := h.repo.GetSalesStats(c.Request.Context(), id, period)
+	form, err := c.MultipartForm()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get sales stats"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid form data: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, stats)
+	files := form.File["files"]
+	altTexts := form.Value["alt_texts"]
+	isMainFlags := form.Value["is_main"]
+
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no files uploaded"})
+		return
+	}
+
+	var uploadedImages []model.ProductImage
+	for i, fileHeader := range files {
+		// --- Логика сохранения файла ---
+		filename := fmt.Sprintf("%s-%s", uuid.New().String(), filepath.Base(fileHeader.Filename))
+		savePath := "./uploads/" + filename
+		if err := c.SaveUploadedFile(fileHeader, savePath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to save file %s: %s", fileHeader.Filename, err.Error())})
+			return
+		}
+		fileURL := "http://" + c.Request.Host + "/uploads/" + filename
+
+		// --- Создание записи в БД ---
+		image := model.ProductImage{
+			ID:        uuid.New(),
+			ProductID: productID,
+			URL:       fileURL,
+		}
+		if i < len(altTexts) {
+			image.AltText = altTexts[i]
+		}
+		if i < len(isMainFlags) {
+			image.IsMain, _ = strconv.ParseBool(isMainFlags[i])
+		}
+
+		if err := h.repo.CreateImage(c.Request.Context(), &image); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save image metadata: " + err.Error()})
+			return
+		}
+		uploadedImages = append(uploadedImages, image)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Изображения успешно загружены",
+		"images":  uploadedImages,
+	})
 }
 
-func (h *ProductHandler) GetPriceHistory(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+// GetCategories GET /api/products/categories
+func (h *ProductHandler) GetCategories(c *gin.Context) {
+	categories, err := h.repo.GetCategories(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get categories"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"categories": categories})
+}
+
+// GetSizeChart GET /api/products/sizes
+func (h *ProductHandler) GetSizeChart(c *gin.Context) {
+	category := c.Query("category")
+	if category == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter 'category' is required"})
 		return
 	}
 
-	history, err := h.repo.GetPriceHistory(c.Request.Context(), id)
+	sizeChart, err := h.repo.GetSizeChart(c.Request.Context(), category)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get price history"})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("size chart for category '%s' not found", category)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get size chart"})
 		return
 	}
 
-	c.JSON(http.StatusOK, history)
+	c.JSON(http.StatusOK, sizeChart)
 }
