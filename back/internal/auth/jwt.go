@@ -1,7 +1,11 @@
+// internal/auth/jwt.go
+
 package auth
 
 import (
+	"crypto/rand"
 	"errors"
+	"math/big"
 	"os"
 	"strconv"
 	"time"
@@ -10,13 +14,29 @@ import (
 	"github.com/google/uuid"
 )
 
+// GenerateTemporaryPassword - Новая функция
+func GenerateTemporaryPassword(length int) (string, error) {
+	const letters = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	result := make([]byte, length)
+	for i := range result {
+		num, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
+		if err != nil {
+			return "", err
+		}
+		result[i] = letters[num.Int64()]
+	}
+	return string(result), nil
+}
+
 type Claims struct {
 	UserID uuid.UUID `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID uuid.UUID) (string, error) {
-	jwtSecret := os.Getenv("JWT_SECRET")
+// GenerateJWT - переименовано из GenerateToken
+func GenerateJWT(userID uuid.UUID) (string, error) {
+	// ... (остальной код функции без изменений)
+    jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		return "", errors.New("JWT secret not configured")
 	}
@@ -41,31 +61,9 @@ func GenerateToken(userID uuid.UUID) (string, error) {
 	return token.SignedString([]byte(jwtSecret))
 }
 
-func ParseToken(tokenStr string) (uuid.UUID, error) {
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		return uuid.Nil, errors.New("JWT secret not configured")
-	}
-
-	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, errors.New("unexpected signing method")
-		}
-		return []byte(jwtSecret), nil
-	})
-
-	if err != nil {
-		return uuid.Nil, err
-	}
-
-	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-		return claims.UserID, nil
-	}
-
-	return uuid.Nil, errors.New("invalid token claims")
-}
-
+// ValidateToken - без изменений
 func ValidateToken(tokenStr string) (*Claims, error) {
+    // ... (код функции без изменений)
 	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		return nil, errors.New("JWT secret not configured")

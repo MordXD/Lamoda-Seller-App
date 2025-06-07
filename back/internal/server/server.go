@@ -76,7 +76,6 @@ func Init(cfg *config.Config) (*Server, error) {
 			"version":   "1.0.0",
 		})
 	})
-
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
 
@@ -88,16 +87,18 @@ func Init(cfg *config.Config) (*Server, error) {
 	{
 		auth.POST("/register", userHandler.Register)
 		auth.POST("/login", userHandler.Login)
-		auth.POST("/validate-token", userHandler.ValidateToken)           // NEW
-		auth.POST("/validate-tokens", userHandler.ValidateMultipleTokens) // NEW
+		auth.POST("/validate-token", userHandler.ValidateToken)
+		auth.POST("/validate-tokens", userHandler.ValidateMultipleTokens)
 	}
 
-	// Protected routes remain the same
-	authorized := r.Group("/api")
-	authorized.Use(middleware.JWTAuthMiddleware())
+	// Protected routes - группа теперь называется `api`, а не `authorized`
+	api := r.Group("/api")
+	api.Use(middleware.JWTAuthMiddleware())
 	{
-		authorized.GET("/profile", userHandler.GetProfile)
-		authorized.PUT("/profile", userHandler.UpdateProfile)
+		api.GET("/profile", userHandler.GetProfile)
+		api.PUT("/profile", userHandler.UpdateProfile)
+		// !!! НОВЫЙ МАРШРУТ ДЛЯ СМЕНЫ ПАРОЛЯ !!!
+		api.POST("/password/change", userHandler.ChangePassword)
 	}
 
 	return &Server{
