@@ -38,18 +38,19 @@ func NewDashboardRepository(db *gorm.DB) *DashboardRepository {
 }
 
 // GetAggregatedData получает сводные данные за указанный период.
+// ИСПРАВЛЕНО: Запросы теперь соответствуют схеме. Сумма берется из JSONB 'totals'.
 func (r *DashboardRepository) GetAggregatedData(ctx context.Context, start, end time.Time) (AggregatedData, error) {
 	var result AggregatedData
 
-	// ИСПРАВЛЕНИЕ: Запрос разделен на два для эффективности и корректности.
 	// 1. Агрегируем данные из основной таблицы 'orders'.
 	err := r.db.WithContext(ctx).Model(&model.Order{}).
 		Select(`
-			COALESCE(SUM(CASE WHEN status = 'ordered' THEN amount ELSE 0 END), 0) as revenue,
+			COALESCE(SUM(CASE WHEN status = 'ordered' THEN (totals->>'total')::numeric ELSE 0 END), 0) as revenue,
 			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) as orders_count,
 			COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as returns_count,
-			COALESCE(SUM(CASE WHEN status = 'returned' THEN amount ELSE 0 END), 0) as returns_sum
+			COALESCE(SUM(CASE WHEN status = 'returned' THEN (totals->>'total')::numeric ELSE 0 END), 0) as returns_sum
 		`).
+		// ВАЖНО: Ваша модель Order использует поле CreatedAt, что GORM мапит в `created_at`. Это совпадает со схемой.
 		Where("created_at BETWEEN ? AND ?", start, end).
 		Scan(&result).Error
 	if err != nil {
@@ -59,7 +60,7 @@ func (r *DashboardRepository) GetAggregatedData(ctx context.Context, start, end 
 	// 2. Отдельно и эффективно считаем количество проданных товаров.
 	err = r.db.WithContext(ctx).Model(&model.OrderItem{}).
 		Joins("JOIN orders ON orders.id = order_items.order_id").
-		Where("orders.status = ? AND orders.created_at BETWEEN ? AND ?", "ordered", start, end).
+		Where("orders.status = 'ordered' AND orders.created_at BETWEEN ? AND ?", start, end).
 		Select("COALESCE(SUM(order_items.quantity), 0)").
 		Scan(&result.ItemsSoldCount).Error
 
@@ -71,24 +72,23 @@ func (r *DashboardRepository) GetAggregatedData(ctx context.Context, start, end 
 }
 
 // GetTopCategories получает топ-N категорий по выручке.
+// ИСПРАВЛЕНО: Запрос теперь соединяет order_items с products и группирует по текстовому полю products.category.
 func (r *DashboardRepository) GetTopCategories(ctx context.Context, start, end time.Time, limit int) ([]model.TopCategory, error) {
 	var results []model.TopCategory
 
-	// Этот запрос предполагает наличие связей Order -> OrderItem -> Product -> Category.
-	// Адаптируйте join'ы и имена таблиц/полей под вашу схему.
 	err := r.db.WithContext(ctx).Model(&model.Order{}).
 		Select(`
-			categories.slug as category,
-			categories.name as name,
-			SUM(orders.amount) as revenue,
+			products.category as category,
+			products.category as name, -- Используем категорию и как слаг, и как имя
+			SUM((orders.totals->>'total')::numeric) as revenue,
 			COUNT(DISTINCT orders.id) as orders,
 			SUM(order_items.quantity) as items
 		`).
 		Joins("JOIN order_items ON order_items.order_id = orders.id").
+		// Соединяем с таблицей products по product_id
 		Joins("JOIN products ON products.id = order_items.product_id").
-		Joins("JOIN categories ON categories.id = products.category_id").
 		Where("orders.status = ? AND orders.created_at BETWEEN ? AND ?", "ordered", start, end).
-		Group("categories.slug, categories.name").
+		Group("products.category").
 		Order("revenue DESC").
 		Limit(limit).
 		Scan(&results).Error
@@ -100,17 +100,15 @@ func (r *DashboardRepository) GetTopCategories(ctx context.Context, start, end t
 }
 
 // GetHourlySales получает почасовую статистику.
+// ИСПРАВЛЕНО: Сумма берется из JSONB 'totals'.
 func (r *DashboardRepository) GetHourlySales(ctx context.Context, start, end time.Time) ([]model.HourlySale, error) {
 	var results []model.HourlySale
 
-	// Функция EXTRACT(HOUR FROM ...) специфична для PostgreSQL.
-	// Для MySQL используйте HOUR(created_at).
-	// Для SQLite используйте strftime('%H', created_at).
-	hourExtractor := "EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')" // Пример для PostgreSQL
+	hourExtractor := "EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')"
 
 	err := r.db.WithContext(ctx).Model(&model.Order{}).
 		Select(
-			fmt.Sprintf("%s as hour, SUM(amount) as revenue, COUNT(*) as orders", hourExtractor),
+			fmt.Sprintf("%s as hour, SUM((totals->>'total')::numeric) as revenue, COUNT(*) as orders", hourExtractor),
 		).
 		Where("status = ? AND created_at BETWEEN ? AND ?", "ordered", start, end).
 		Group("hour").
@@ -124,24 +122,21 @@ func (r *DashboardRepository) GetHourlySales(ctx context.Context, start, end tim
 }
 
 // GetSalesChartData получает данные для построения графика.
+// ИСПРАВЛЕНО: Все расчеты выручки используют JSONB-поле 'totals'.
 func (r *DashboardRepository) GetSalesChartData(ctx context.Context, start, end time.Time, granularity string) ([]model.SalesChartDataPoint, error) {
 	var results []model.SalesChartDataPoint
 
-	// DATE_TRUNC специфичен для PostgreSQL.
-	// Для MySQL: DATE_FORMAT(created_at, '%Y-%m-%d'), etc.
-	// Для SQLite: strftime('%Y-%m-%d', created_at), etc.
 	dateTruncFunc := fmt.Sprintf("DATE_TRUNC('%s', created_at AT TIME ZONE 'UTC')", granularity)
 
 	err := r.db.WithContext(ctx).Model(&model.Order{}).
 		Select(fmt.Sprintf(`
 			%s as timestamp,
-			COALESCE(SUM(CASE WHEN status = 'ordered' THEN amount ELSE 0 END), 0) as orders_revenue,
-			-- ИСПРАВЛЕНИЕ: Корректный расчет выручки с учетом возвратов
-			COALESCE(SUM(CASE WHEN status = 'ordered' THEN amount ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN status = 'returned' THEN amount ELSE 0 END), 0) as purchases_revenue,
+			COALESCE(SUM(CASE WHEN status = 'ordered' THEN (totals->>'total')::numeric ELSE 0 END), 0) as orders_revenue,
+			COALESCE(SUM(CASE WHEN status = 'ordered' THEN (totals->>'total')::numeric ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN status = 'returned' THEN (totals->>'total')::numeric ELSE 0 END), 0) as purchases_revenue,
 			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) as orders_count,
 			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) - COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as purchases_count,
 			COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as return_count,
-			COALESCE(SUM(CASE WHEN status = 'returned' THEN amount ELSE 0 END), 0) as return_revenue
+			COALESCE(SUM(CASE WHEN status = 'returned' THEN (totals->>'total')::numeric ELSE 0 END), 0) as return_revenue
 		`, dateTruncFunc)).
 		Where("created_at BETWEEN ? AND ?", start, end).
 		Group("timestamp").
