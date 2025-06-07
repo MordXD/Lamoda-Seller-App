@@ -39,7 +39,7 @@ type ErrorResponse struct {
 // GetStats обрабатывает GET /api/dashboard/stats
 func (h *DashboardHandler) GetStats(c *gin.Context) {
 	var params model.StatsRequestParams
-	if err := c.ShouldBindQuery(params); err != nil {
+	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid query parameters: " + err.Error()})
 		return
 	}
@@ -104,7 +104,7 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 // GetSalesChart обрабатывает GET /api/dashboard/sales-chart
 func (h *DashboardHandler) GetSalesChart(c *gin.Context) {
 	var params model.SalesChartRequestParams
-	if err := c.ShouldBindQuery(params); err != nil {
+	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid query parameters: " + err.Error()})
 		return
 	}
