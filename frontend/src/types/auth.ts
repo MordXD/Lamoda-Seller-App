@@ -1,0 +1,32 @@
+export interface User {
+  id: string;
+  email: string;
+  shopName: string;
+}
+
+export interface Account {
+  id: string;
+  shopName: string;
+  token: string;
+  user?: User;
+}
+
+export interface LoginResponse {
+  accessToken: string;
+  user: User;
+}
+
+export interface LoginData {
+  email: string;
+  password: string;
+}
+
+export interface AuthContextType {
+  accounts: Account[];
+  activeAccount: Account | null;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => void;
+  switchAccount: (accountId: string) => void;
+  addAccount: (account: Account) => void;
+} 
