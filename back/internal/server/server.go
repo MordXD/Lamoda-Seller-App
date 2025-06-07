@@ -75,7 +75,10 @@ func Init(cfg *config.Config) (*Server, error) {
 
 	// Initialize repositories and handlers
 	userRepo := repository.NewUserRepository(db)
+	productRepo := repository.NewProductRepository(db)
+	productHandler := handler.NewProductHandler(productRepo)
 	userHandler := handler.NewUserHandler(userRepo)
+	
 
 	// Создаем одну родительскую группу /api
 	api := r.Group("/api")
@@ -118,6 +121,20 @@ func Init(cfg *config.Config) (*Server, error) {
 				account.POST("/link", userHandler.LinkAccount)
 				account.POST("/switch", userHandler.SwitchAccount)
 				account.GET("/links", userHandler.GetLinkedAccounts)
+			}
+			// --- !!! НОВЫЕ МАРШРУТЫ ДЛЯ ПРОДАВЦА !!! ---
+			seller := protected.Group("/seller")
+			{
+				products := seller.Group("/products")
+				{
+					products.GET("", productHandler.ListProducts)
+					products.POST("", productHandler.CreateProduct)
+					products.GET("/:id", productHandler.GetProductByID)
+					products.PUT("/:id", productHandler.UpdateProduct)
+					products.DELETE("/:id", productHandler.DeleteProduct)
+					products.GET("/:id/stats", productHandler.GetSalesStats)
+					products.GET("/:id/price-history", productHandler.GetPriceHistory)
+				}
 			}
 		}
 	}
