@@ -19,10 +19,12 @@ export default function LoginPage() {
     }
 
     try {
+      console.log('Начинаем авторизацию с данными:', { login });
       await authLogin(login, password);
+      console.log('Авторизация успешна, перенаправляем на dashboard');
       navigate('/dashboard');
     } catch (error) {
-      console.error('Login failed:', error);
+      console.error('Ошибка авторизации в LoginPage:', error);
       setError('Неверный логин или пароль');
     }
   };
