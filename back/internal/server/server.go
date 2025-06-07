@@ -84,8 +84,9 @@ func Init(cfg *config.Config) (*Server, error) {
 	}
 
 	// Protected routes - require authentication
+	// FIXED: Removed the cfg.JWTSecret parameter since the middleware doesn't accept it
 	authorized := r.Group("/api")
-	authorized.Use(middleware.JWTAuthMiddleware(cfg.JWTSecret))
+	authorized.Use(middleware.JWTAuthMiddleware())
 	{
 		// User profile endpoints
 		authorized.GET("/profile", userHandler.GetProfile)
