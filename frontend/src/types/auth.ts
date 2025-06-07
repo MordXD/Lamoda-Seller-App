@@ -11,6 +11,12 @@ export interface Account {
   user?: User;
 }
 
+// Ответ сервера (фактический)
+export interface ServerLoginResponse {
+  token: string;
+}
+
+// Ожидаемый ответ (для будущего использования)
 export interface LoginResponse {
   accessToken: string;
   user: User;
@@ -25,6 +31,7 @@ export interface AuthContextType {
   accounts: Account[];
   activeAccount: Account | null;
   isLoading: boolean;
+  isInitialized: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
   switchAccount: (accountId: string) => void;
