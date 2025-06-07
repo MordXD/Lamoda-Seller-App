@@ -1,35 +1,34 @@
 package handler
 
 import (
-	"errors"
+	"log"
 	"net/http"
-	"os"
 	"time"
 
+	"github.com/lamoda-seller-app/internal/auth"
 	"github.com/lamoda-seller-app/internal/middleware"
 	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type UserHandler struct {
-    userRepo *repository.UserRepository
+	userRepo *repository.UserRepository
 }
 
 func NewUserHandler(userRepo *repository.UserRepository) *UserHandler {
-    return &UserHandler{
-        userRepo: userRepo,
-    }
+	return &UserHandler{
+		userRepo: userRepo,
+	}
 }
 
 type RegisterRequest struct {
-	Name     string `json:"name" binding:"required"`
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=6"`
+	Name     string `json:"name" binding:"required,min=2,max=100"`
+	Email    string `json:"email" binding:"required,email,max=255"`
+	Password string `json:"password" binding:"required,min=8,max=128"`
 }
 
 type LoginRequest struct {
@@ -38,8 +37,8 @@ type LoginRequest struct {
 }
 
 type UpdateProfileRequest struct {
-	Name  string `json:"name" binding:"required"`
-	Email string `json:"email" binding:"required,email"`
+	Name  string `json:"name" binding:"required,min=2,max=100"`
+	Email string `json:"email" binding:"required,email,max=255"`
 }
 
 type AuthResponse struct {
@@ -58,8 +57,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request",
-			"details": err.Error(),
+			"error": "Invalid request data",
 		})
 		return
 	}
@@ -67,7 +65,8 @@ func (h *UserHandler) Register(c *gin.Context) {
 	// Check if user already exists
 	existingUser, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user existence"})
+		log.Printf("Error checking user existence: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -79,7 +78,8 @@ func (h *UserHandler) Register(c *gin.Context) {
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		log.Printf("Error hashing password: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -91,14 +91,16 @@ func (h *UserHandler) Register(c *gin.Context) {
 	}
 
 	if err := h.userRepo.Create(c.Request.Context(), user); err != nil {
+		log.Printf("Error creating user: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
 
 	// Generate token
-	token, err := generateToken(user.ID)
+	token, err := auth.GenerateToken(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		log.Printf("Error generating token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -117,8 +119,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request",
-			"details": err.Error(),
+			"error": "Invalid request data",
 		})
 		return
 	}
@@ -126,7 +127,8 @@ func (h *UserHandler) Login(c *gin.Context) {
 	// Find user by email
 	user, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
+		log.Printf("Error finding user: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -142,9 +144,10 @@ func (h *UserHandler) Login(c *gin.Context) {
 	}
 
 	// Generate token
-	token, err := generateToken(user.ID)
+	token, err := auth.GenerateToken(user.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		log.Printf("Error generating token: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -163,20 +166,21 @@ func (h *UserHandler) GetProfile(c *gin.Context) {
 	// Get user ID from JWT middleware
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in token"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID format"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication"})
 		return
 	}
 
 	// Get user from database
 	user, err := h.userRepo.GetByID(c.Request.Context(), userUUID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user profile"})
+		log.Printf("Error getting user profile: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -197,21 +201,20 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	// Get user ID from JWT middleware
 	userID, exists := c.Get(middleware.UserIDKey)
 	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in token"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 
 	userUUID, ok := userID.(uuid.UUID)
 	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID format"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authentication"})
 		return
 	}
 
 	var req UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request",
-			"details": err.Error(),
+			"error": "Invalid request data",
 		})
 		return
 	}
@@ -219,7 +222,8 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	// Get current user
 	user, err := h.userRepo.GetByID(c.Request.Context(), userUUID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user"})
+		log.Printf("Error getting user: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -232,7 +236,8 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	if req.Email != user.Email {
 		existingUser, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check email availability"})
+			log.Printf("Error checking email availability: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 			return
 		}
 
@@ -248,6 +253,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 
 	// Save updated user
 	if err := h.userRepo.Update(c.Request.Context(), user); err != nil {
+		log.Printf("Error updating profile: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
 		return
 	}
@@ -258,21 +264,4 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		Name:      user.Name,
 		CreatedAt: user.CreatedAt,
 	})
-}
-
-func generateToken(userID uuid.UUID) (string, error) {
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		return "", errors.New("JWT secret not configured")
-	}
-
-	claims := jwt.MapClaims{
-		"user_id": userID.String(),
-		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(), // 7 days
-		"iat":     time.Now().Unix(),
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
-	return token.SignedString([]byte(jwtSecret))
 }

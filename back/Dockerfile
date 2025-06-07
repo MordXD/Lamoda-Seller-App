@@ -1,9 +1,9 @@
-FROM golang:1.24.1-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
 # Install dependencies
-RUN apk add --no-cache git
+RUN apk add --no-cache git ca-certificates tzdata
 
 # Copy go mod files
 COPY go.mod go.sum ./
@@ -18,18 +18,28 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/main.g
 # Final stage
 FROM alpine:latest
 
+# Install ca-certificates for HTTPS requests
 RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /root/
 
 # Copy the binary from builder stage
 COPY --from=builder /app/main .
 
+# Copy .env file if it exists (optional)
+COPY --from=builder /app/.env* ./
+
 # Create a non-root user
 RUN addgroup -g 1001 appuser && \
-    adduser -D -s /bin/sh -u 1001 -G appuser appuser
+    adduser -D -s /bin/sh -u 1001 -G appuser appuser && \
+    chown appuser:appuser /root/main
 
 USER appuser
 
-EXPOSE 8080
+# Expose the port defined in environment variable (default 8080)
+EXPOSE ${SERVER_PORT:-8080}
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:${SERVER_PORT:-8080}/health || exit 1
 
 CMD ["./main"]
