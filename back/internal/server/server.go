@@ -1,3 +1,4 @@
+// server/server.go
 package server
 
 import (
@@ -19,7 +20,6 @@ import (
 	"github.com/lamoda-seller-app/internal/config"
 	"github.com/lamoda-seller-app/internal/handler"
 	"github.com/lamoda-seller-app/internal/middleware"
-	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
 )
 
@@ -50,23 +50,7 @@ func Init(cfg *config.Config) (*Server, error) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// --- ИЗМЕНЕНИЕ: Обновляем миграцию под новые модели продуктов ---
-	// Убираем старые PricePoint и ProductSales, добавляем ProductImage и Supplier.
-	if err := db.AutoMigrate(
-		&model.User{},
-		&model.AccountLink{},
-		&model.Product{},
-		&model.ProductVariant{},
-		&model.ProductImage{},
-		&model.Supplier{},
-	); err != nil {
-		return nil, fmt.Errorf("failed to migrate database: %w", err)
-	}
-	// Убедитесь, что в вашей БД включено расширение для UUID:
-	// CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-	db.Exec(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
-
-	log.Println("✅ Connected to database and migrated tables")
+	log.Println("✅ Connected to database")
 
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -79,8 +63,13 @@ func Init(cfg *config.Config) (*Server, error) {
 	// Initialize repositories and handlers
 	userRepo := repository.NewUserRepository(db)
 	productRepo := repository.NewProductRepository(db)
-	productHandler := handler.NewProductHandler(productRepo)
+	orderRepo := repository.NewOrderRepository(db)
+	dashboardRepo := repository.NewDashboardRepository(db)
+
 	userHandler := handler.NewUserHandler(userRepo)
+	productHandler := handler.NewProductHandler(productRepo)
+	orderHandler := handler.NewOrderHandler(orderRepo)
+	dashboardHandler := handler.NewDashboardHandler(dashboardRepo)
 
 	// Создаем одну родительскую группу /api
 	api := r.Group("/api")
@@ -130,22 +119,31 @@ func Init(cfg *config.Config) (*Server, error) {
 				balance.POST("/withdraw", userHandler.WithdrawBalance)
 			}
 
-			// --- !!! ИЗМЕНЕНИЕ: Заменяем старые маршруты продуктов на новые в соответствии с ТЗ !!! ---
+			// --- Маршруты для продуктов ---
 			products := protected.Group("/products")
 			{
-				// Получение списков и справочников
-				products.GET("", productHandler.ListProducts)           // GET /api/products
-				products.GET("/categories", productHandler.GetCategories) // GET /api/products/categories
-				products.GET("/sizes", productHandler.GetSizeChart)       // GET /api/products/sizes
+				products.GET("", productHandler.ListProducts)
+				products.GET("/categories", productHandler.GetCategories)
+				products.GET("/sizes", productHandler.GetSizeChart)
+				products.POST("", productHandler.CreateProduct)
+				products.GET("/:id", productHandler.GetProductByID)
+				products.PUT("/:id", productHandler.UpdateProduct)
+				products.DELETE("/:id", productHandler.DeleteProduct)
+				products.POST("/:id/images", productHandler.UploadImages)
+			}
+			// --- Маршруты для заказов ---
+			orders := protected.Group("/orders")
+			{
+				orders.GET("", orderHandler.ListOrders)
+				orders.GET("/:order_id", orderHandler.GetOrderByID)
+				orders.PUT("/:order_id/status", orderHandler.UpdateOrderStatus)
+			}
 
-				// CRUD операции для конкретного товара
-				products.POST("", productHandler.CreateProduct)     // POST /api/products
-				products.GET("/:id", productHandler.GetProductByID) // GET /api/products/{id}
-				products.PUT("/:id", productHandler.UpdateProduct)  // PUT /api/products/{id}
-				products.DELETE("/:id", productHandler.DeleteProduct) // DELETE /api/products/{id} (стандартный REST)
-
-				// Операции с изображениями товара
-				products.POST("/:id/images", productHandler.UploadImages) // POST /api/products/{id}/images
+			// --- Маршруты для дашборда ---
+			dashboard := protected.Group("/dashboard")
+			{
+				dashboard.GET("/stats", dashboardHandler.GetStats)
+				dashboard.GET("/sales-chart", dashboardHandler.GetSalesChart)
 			}
 		}
 	}

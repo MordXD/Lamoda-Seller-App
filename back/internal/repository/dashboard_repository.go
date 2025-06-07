@@ -1,148 +1,150 @@
+// internal/repository/dashboard.go
 package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
-	"github.com/lamoda-seller-app/internal/model"
+	"github.com/lamoda-seller-app/internal/model" // Путь к вашим моделям
 	"gorm.io/gorm"
 )
+
+// AggregatedData - это структура для сбора всех ключевых метрик за период.
+type AggregatedData struct {
+	Revenue        float64
+	OrdersCount    int64
+	ItemsSoldCount int64
+	ReturnsCount   int64
+	ReturnsSum     float64
+}
+
+// DashboardRepositoryInterface определяет контракт для работы с дашбордом
+type DashboardRepositoryInterface interface {
+	GetAggregatedData(ctx context.Context, start, end time.Time) (AggregatedData, error)
+	GetTopCategories(ctx context.Context, start, end time.Time, limit int) ([]model.TopCategory, error)
+	GetHourlySales(ctx context.Context, start, end time.Time) ([]model.HourlySale, error)
+	GetSalesChartData(ctx context.Context, start, end time.Time, granularity string) ([]model.SalesChartDataPoint, error)
+}
+
+var _ DashboardRepositoryInterface = (*DashboardRepository)(nil)
 
 type DashboardRepository struct {
 	db *gorm.DB
 }
 
-type DashboardRepositoryInterface interface {
-	GetDashboardData(ctx context.Context) (*model.DashboardResponse, error)
-}
-
-var _ DashboardRepositoryInterface = (*DashboardRepository)(nil)
-
 func NewDashboardRepository(db *gorm.DB) *DashboardRepository {
 	return &DashboardRepository{db: db}
 }
 
-func (r *DashboardRepository) GetDashboardData(ctx context.Context) (*model.DashboardResponse, error) {
-	now := time.Now().UTC()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	todayEnd := todayStart.AddDate(0, 0, 1).Add(-time.Nanosecond)
-	yesterdayStart := todayStart.AddDate(0, 0, -1)
-	yesterdayEnd := todayStart
+// GetAggregatedData получает сводные данные за указанный период.
+// ИСПРАВЛЕНО: Запросы теперь соответствуют схеме. Сумма берется из JSONB 'totals'.
+func (r *DashboardRepository) GetAggregatedData(ctx context.Context, start, end time.Time) (AggregatedData, error) {
+	var result AggregatedData
 
-	todayData, err := r.getKpiData(ctx, todayStart, todayEnd)
-	if err != nil {
-		return nil, fmt.Errorf("get today KPI: %w", err)
-	}
-
-	yesterdayData, err := r.getKpiData(ctx, yesterdayStart, yesterdayEnd)
-	if err != nil {
-		return nil, fmt.Errorf("get yesterday KPI: %w", err)
-	}
-
-	kpi := model.KPI{
-		TotalAmount:       todayData.Amount,
-		TotalOrders:       todayData.Orders,
-		AmountDiffPercent: calculatePercentChange(todayData.Amount, yesterdayData.Amount),
-		OrdersDiffPercent: calculatePercentChange(float64(todayData.Orders), float64(yesterdayData.Orders)),
-	}
-
-	salesChart, err := r.getSalesChartData(ctx, todayStart.AddDate(0, 0, -6), todayEnd)
-	if err != nil {
-		return nil, fmt.Errorf("get sales chart data: %w", err)
-	}
-
-	return &model.DashboardResponse{
-		KPI:        kpi,
-		SalesChart: *salesChart,
-	}, nil
-}
-
-type kpiData struct {
-	Amount float64
-	Orders int
-}
-
-func (r *DashboardRepository) getKpiData(ctx context.Context, start, end time.Time) (kpiData, error) {
-	var result kpiData
+	// 1. Агрегируем данные из основной таблицы 'orders'.
 	err := r.db.WithContext(ctx).Model(&model.Order{}).
-		Select("COALESCE(SUM(amount), 0) as amount, COUNT(*) as orders").
-		Where("status = ? AND created_at BETWEEN ? AND ?", "ordered", start, end).
-		Scan(&result).Error
-
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return kpiData{}, nil
-	}
-
-	return result, err
-}
-
-func (r *DashboardRepository) getSalesChartData(ctx context.Context, start, end time.Time) (*model.DashboardSalesChart, error) {
-	orderedMap := make(map[string]float64)
-	deliveredMap := make(map[string]float64)
-
-	current := start
-	for !current.After(end) {
-		dateStr := current.Format("2006-01-02")
-		orderedMap[dateStr] = 0
-		deliveredMap[dateStr] = 0
-		current = current.AddDate(0, 0, 1)
-	}
-
-	type chartData struct {
-		Date   string
-		Status string
-		Amount float64
-	}
-
-	var results []chartData
-	err := r.db.WithContext(ctx).Model(&model.Order{}).
-		Select("DATE(created_at) as date, status, COALESCE(SUM(amount), 0) as amount").
+		Select(`
+			COALESCE(SUM(CASE WHEN status = 'ordered' THEN (totals->>'total')::numeric ELSE 0 END), 0) as revenue,
+			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) as orders_count,
+			COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as returns_count,
+			COALESCE(SUM(CASE WHEN status = 'returned' THEN (totals->>'total')::numeric ELSE 0 END), 0) as returns_sum
+		`).
+		// ВАЖНО: Ваша модель Order использует поле CreatedAt, что GORM мапит в `created_at`. Это совпадает со схемой.
 		Where("created_at BETWEEN ? AND ?", start, end).
-		Group("date, status").
+		Scan(&result).Error
+	if err != nil {
+		return AggregatedData{}, fmt.Errorf("failed to get aggregated data from orders: %w", err)
+	}
+
+	// 2. Отдельно и эффективно считаем количество проданных товаров.
+	err = r.db.WithContext(ctx).Model(&model.OrderItem{}).
+		Joins("JOIN orders ON orders.id = order_items.order_id").
+		Where("orders.status = 'ordered' AND orders.created_at BETWEEN ? AND ?", start, end).
+		Select("COALESCE(SUM(order_items.quantity), 0)").
+		Scan(&result.ItemsSoldCount).Error
+
+	if err != nil {
+		return AggregatedData{}, fmt.Errorf("failed to get items sold count: %w", err)
+	}
+
+	return result, nil
+}
+
+// GetTopCategories получает топ-N категорий по выручке.
+// ИСПРАВЛЕНО: Запрос теперь соединяет order_items с products и группирует по текстовому полю products.category.
+func (r *DashboardRepository) GetTopCategories(ctx context.Context, start, end time.Time, limit int) ([]model.TopCategory, error) {
+	var results []model.TopCategory
+
+	err := r.db.WithContext(ctx).Model(&model.Order{}).
+		Select(`
+			products.category as category,
+			products.category as name, -- Используем категорию и как слаг, и как имя
+			SUM((orders.totals->>'total')::numeric) as revenue,
+			COUNT(DISTINCT orders.id) as orders,
+			SUM(order_items.quantity) as items
+		`).
+		Joins("JOIN order_items ON order_items.order_id = orders.id").
+		// Соединяем с таблицей products по product_id
+		Joins("JOIN products ON products.id = order_items.product_id").
+		Where("orders.status = ? AND orders.created_at BETWEEN ? AND ?", "ordered", start, end).
+		Group("products.category").
+		Order("revenue DESC").
+		Limit(limit).
 		Scan(&results).Error
 
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get top categories: %w", err)
 	}
-
-	for _, res := range results {
-		switch res.Status {
-		case "ordered":
-			orderedMap[res.Date] = res.Amount
-		case "delivered":
-			deliveredMap[res.Date] = res.Amount
-		}
-	}
-
-	var orderedPoints, deliveredPoints []model.SalesChartPoint
-	current = start
-	for !current.After(end) {
-		dateStr := current.Format("2006-01-02")
-		orderedPoints = append(orderedPoints, model.SalesChartPoint{
-			Date:   dateStr,
-			Amount: orderedMap[dateStr],
-		})
-		deliveredPoints = append(deliveredPoints, model.SalesChartPoint{
-			Date:   dateStr,
-			Amount: deliveredMap[dateStr],
-		})
-		current = current.AddDate(0, 0, 1)
-	}
-
-	return &model.DashboardSalesChart{
-		Ordered:   orderedPoints,
-		Delivered: deliveredPoints,
-	}, nil
+	return results, nil
 }
 
-func calculatePercentChange(today, yesterday float64) float64 {
-	if yesterday == 0 {
-		if today == 0 {
-			return 0
-		}
-		return 100
+// GetHourlySales получает почасовую статистику.
+// ИСПРАВЛЕНО: Сумма берется из JSONB 'totals'.
+func (r *DashboardRepository) GetHourlySales(ctx context.Context, start, end time.Time) ([]model.HourlySale, error) {
+	var results []model.HourlySale
+
+	hourExtractor := "EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')"
+
+	err := r.db.WithContext(ctx).Model(&model.Order{}).
+		Select(
+			fmt.Sprintf("%s as hour, SUM((totals->>'total')::numeric) as revenue, COUNT(*) as orders", hourExtractor),
+		).
+		Where("status = ? AND created_at BETWEEN ? AND ?", "ordered", start, end).
+		Group("hour").
+		Order("hour ASC").
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get hourly sales: %w", err)
 	}
-	return ((today - yesterday) / yesterday) * 100
+	return results, nil
+}
+
+// GetSalesChartData получает данные для построения графика.
+// ИСПРАВЛЕНО: Все расчеты выручки используют JSONB-поле 'totals'.
+func (r *DashboardRepository) GetSalesChartData(ctx context.Context, start, end time.Time, granularity string) ([]model.SalesChartDataPoint, error) {
+	var results []model.SalesChartDataPoint
+
+	dateTruncFunc := fmt.Sprintf("DATE_TRUNC('%s', created_at AT TIME ZONE 'UTC')", granularity)
+
+	err := r.db.WithContext(ctx).Model(&model.Order{}).
+		Select(fmt.Sprintf(`
+			%s as timestamp,
+			COALESCE(SUM(CASE WHEN status = 'ordered' THEN (totals->>'total')::numeric ELSE 0 END), 0) as orders_revenue,
+			COALESCE(SUM(CASE WHEN status = 'ordered' THEN (totals->>'total')::numeric ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN status = 'returned' THEN (totals->>'total')::numeric ELSE 0 END), 0) as purchases_revenue,
+			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) as orders_count,
+			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) - COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as purchases_count,
+			COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as return_count,
+			COALESCE(SUM(CASE WHEN status = 'returned' THEN (totals->>'total')::numeric ELSE 0 END), 0) as return_revenue
+		`, dateTruncFunc)).
+		Where("created_at BETWEEN ? AND ?", start, end).
+		Group("timestamp").
+		Order("timestamp ASC").
+		Scan(&results).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get sales chart data: %w", err)
+	}
+	return results, nil
 }
