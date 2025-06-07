@@ -51,7 +51,15 @@ func Init(cfg *config.Config) (*Server, error) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	if err := db.AutoMigrate(&model.User{}, &model.AccountLink{}); err != nil {
+	// !!! ДОБАВЛЯЕМ НОВЫЕ МОДЕЛИ ПРОДУКТА В МИГРАЦИЮ !!!
+	if err := db.AutoMigrate(
+		&model.User{}, 
+		&model.AccountLink{},
+		&model.Product{},
+		&model.ProductVariant{},
+		&model.PricePoint{},
+		&model.ProductSales{},
+	); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 
