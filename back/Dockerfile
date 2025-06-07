@@ -1,45 +1,39 @@
-FROM golang:1.23-alpine AS builder
+# Build stage
+FROM golang:1.24-alpine AS builder
 
+# Install necessary build tools
+RUN apk add --no-cache git
+
+# Set working directory
 WORKDIR /app
 
-# Install dependencies
-RUN apk add --no-cache git ca-certificates tzdata
-
-# Copy go mod files
-COPY go.mod go.sum ./
+# Copy go.mod and go.sum files first for better caching
+COPY go.mod go.sum* ./
 RUN go mod download
 
-# Copy source code
+# Copy the rest of the source code
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o kanban ./cmd/server/main.go
 
 # Final stage
-FROM alpine:latest
+FROM alpine:3.21
 
-# Install ca-certificates for HTTPS requests
+# Add ca-certificates for HTTPS
 RUN apk --no-cache add ca-certificates tzdata
-WORKDIR /root/
 
-# Copy the binary from builder stage
-COPY --from=builder /app/main .
+# Set working directory
+WORKDIR /app
 
-# Copy .env file if it exists (optional)
-COPY --from=builder /app/.env* ./
+# Copy the binary from the build stage
+COPY --from=builder /app/kanban .
 
-# Create a non-root user
-RUN addgroup -g 1001 appuser && \
-    adduser -D -s /bin/sh -u 1001 -G appuser appuser && \
-    chown appuser:appuser /root/main
+# Create directories for any necessary files
+RUN mkdir -p /app/data
 
-USER appuser
+# Expose the application port
+EXPOSE 8080
 
-# Expose the port defined in environment variable (default 8080)
-EXPOSE ${SERVER_PORT:-8080}
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:${SERVER_PORT:-8080}/health || exit 1
-
-CMD ["./main"]
+# Run the application
+CMD ["./kanban"]
