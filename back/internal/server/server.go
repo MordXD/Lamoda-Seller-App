@@ -19,7 +19,6 @@ import (
 	"github.com/lamoda-seller-app/internal/config"
 	"github.com/lamoda-seller-app/internal/handler"
 	"github.com/lamoda-seller-app/internal/middleware"
-	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
 )
 
@@ -50,23 +49,7 @@ func Init(cfg *config.Config) (*Server, error) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// --- ИЗМЕНЕНИЕ: Обновляем миграцию под новые модели продуктов ---
-	// Убираем старые PricePoint и ProductSales, добавляем ProductImage и Supplier.
-	if err := db.AutoMigrate(
-		&model.User{},
-		&model.AccountLink{},
-		&model.Product{},
-		&model.ProductVariant{},
-		&model.ProductImage{},
-		&model.Supplier{},
-	); err != nil {
-		return nil, fmt.Errorf("failed to migrate database: %w", err)
-	}
-	// Убедитесь, что в вашей БД включено расширение для UUID:
-	// CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-	db.Exec(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`)
-
-	log.Println("✅ Connected to database and migrated tables")
+	log.Println("✅ Connected to database")
 
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -134,14 +117,14 @@ func Init(cfg *config.Config) (*Server, error) {
 			products := protected.Group("/products")
 			{
 				// Получение списков и справочников
-				products.GET("", productHandler.ListProducts)           // GET /api/products
+				products.GET("", productHandler.ListProducts)             // GET /api/products
 				products.GET("/categories", productHandler.GetCategories) // GET /api/products/categories
 				products.GET("/sizes", productHandler.GetSizeChart)       // GET /api/products/sizes
 
 				// CRUD операции для конкретного товара
-				products.POST("", productHandler.CreateProduct)     // POST /api/products
-				products.GET("/:id", productHandler.GetProductByID) // GET /api/products/{id}
-				products.PUT("/:id", productHandler.UpdateProduct)  // PUT /api/products/{id}
+				products.POST("", productHandler.CreateProduct)       // POST /api/products
+				products.GET("/:id", productHandler.GetProductByID)   // GET /api/products/{id}
+				products.PUT("/:id", productHandler.UpdateProduct)    // PUT /api/products/{id}
 				products.DELETE("/:id", productHandler.DeleteProduct) // DELETE /api/products/{id} (стандартный REST)
 
 				// Операции с изображениями товара
