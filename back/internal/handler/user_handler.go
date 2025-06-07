@@ -41,6 +41,10 @@ type UpdateProfileRequest struct {
 	Email string `json:"email" binding:"required,email,max=255"`
 }
 
+type ValidateTokenRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
 type AuthResponse struct {
 	Token string      `json:"token"`
 	User  UserDetails `json:"user"`
@@ -53,6 +57,16 @@ type UserDetails struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type MultipleAccountsResponse struct {
+	Accounts []AccountInfo `json:"accounts"`
+}
+
+type AccountInfo struct {
+	Token string      `json:"token"`
+	User  UserDetails `json:"user"`
+}
+
+// Existing methods...
 func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -159,6 +173,91 @@ func (h *UserHandler) Login(c *gin.Context) {
 			Name:      user.Name,
 			CreatedAt: user.CreatedAt,
 		},
+	})
+}
+
+// NEW: Validate token and return user info
+func (h *UserHandler) ValidateToken(c *gin.Context) {
+	var req ValidateTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request data",
+		})
+		return
+	}
+
+	// Validate the token
+	userID, err := auth.ParseToken(req.Token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+		return
+	}
+
+	// Get user from database
+	user, err := h.userRepo.GetByID(c.Request.Context(), userID)
+	if err != nil {
+		log.Printf("Error getting user: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	if user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, AuthResponse{
+		Token: req.Token,
+		User: UserDetails{
+			ID:        user.ID.String(),
+			Email:     user.Email,
+			Name:      user.Name,
+			CreatedAt: user.CreatedAt,
+		},
+	})
+}
+
+// NEW: Get all accounts for current session (validate multiple tokens)
+func (h *UserHandler) ValidateMultipleTokens(c *gin.Context) {
+	var tokens struct {
+		Tokens []string `json:"tokens" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&tokens); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request data",
+		})
+		return
+	}
+
+	var accounts []AccountInfo
+
+	for _, tokenStr := range tokens.Tokens {
+		// Validate each token
+		userID, err := auth.ParseToken(tokenStr)
+		if err != nil {
+			continue // Skip invalid tokens
+		}
+
+		// Get user from database
+		user, err := h.userRepo.GetByID(c.Request.Context(), userID)
+		if err != nil || user == nil {
+			continue // Skip if user not found
+		}
+
+		accounts = append(accounts, AccountInfo{
+			Token: tokenStr,
+			User: UserDetails{
+				ID:        user.ID.String(),
+				Email:     user.Email,
+				Name:      user.Name,
+				CreatedAt: user.CreatedAt,
+			},
+		})
+	}
+
+	c.JSON(http.StatusOK, MultipleAccountsResponse{
+		Accounts: accounts,
 	})
 }
 
