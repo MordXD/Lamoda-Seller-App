@@ -51,7 +51,7 @@ func Init(cfg *config.Config) (*Server, error) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	// !!! ДОБАВЛЯЕМ НОВЫЕ МОДЕЛИ ПРОДУКТА В МИГРАЦИЮ !!!
+	// Добавляем новые модели продукта в миграцию
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.AccountLink{},
@@ -70,8 +70,6 @@ func Init(cfg *config.Config) (*Server, error) {
 	}
 	r := gin.Default()
 	r.Use(corsMiddleware(cfg))
-
-	// --- ИЗМЕНЕНИЕ ЛОГИКИ РОУТИНГА ---
 
 	// Initialize repositories and handlers
 	userRepo := repository.NewUserRepository(db)
@@ -120,25 +118,29 @@ func Init(cfg *config.Config) (*Server, error) {
 				account.GET("/links", userHandler.GetLinkedAccounts)
 			}
 
-			// --- !!! НОВЫЕ МАРШРУТЫ ДЛЯ БАЛАНСА !!! ---
+			// Маршруты для баланса
 			balance := protected.Group("/balance")
 			{
 				balance.GET("", userHandler.GetBalance)                // Получить текущий баланс
 				balance.POST("/add", userHandler.AddBalance)           // Пополнить баланс
 				balance.POST("/withdraw", userHandler.WithdrawBalance) // Снять с баланса
 			}
-			// --- !!! НОВЫЕ МАРШРУТЫ ДЛЯ ПРОДАВЦА !!! ---
+
+			// --- !!! ДОБАВЛЕНЫ МАРШРУТЫ ПРОДУКТОВ ДЛЯ ПРОДАВЦА !!! ---
 			seller := protected.Group("/seller")
 			{
 				products := seller.Group("/products")
 				{
-					products.GET("", productHandler.ListProducts)
-					products.POST("", productHandler.CreateProduct)
-					products.GET("/:id", productHandler.GetProductByID)
-					products.PUT("/:id", productHandler.UpdateProduct)
-					products.DELETE("/:id", productHandler.DeleteProduct)
-					products.GET("/:id/stats", productHandler.GetSalesStats)
-					products.GET("/:id/price-history", productHandler.GetPriceHistory)
+					// CRUD операции для продуктов
+					products.GET("", productHandler.ListProducts)       // GET /api/seller/products
+					products.POST("", productHandler.CreateProduct)     // POST /api/seller/products
+					products.GET("/:id", productHandler.GetProductByID) // GET /api/seller/products/123
+					products.PUT("/:id", productHandler.UpdateProduct)  // PUT /api/seller/products/123
+					products.DELETE("/:id", productHandler.DeleteProduct) // DELETE /api/seller/products/123
+
+					// Дополнительные роуты для статистики и истории
+					products.GET("/:id/stats", productHandler.GetSalesStats)         // GET /api/seller/products/123/stats
+					products.GET("/:id/price-history", productHandler.GetPriceHistory) // GET /api/seller/products/123/price-history
 				}
 			}
 		}
@@ -152,7 +154,6 @@ func Init(cfg *config.Config) (*Server, error) {
 }
 
 func corsMiddleware(cfg *config.Config) gin.HandlerFunc {
-	// ... (код corsMiddleware без изменений)
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 
@@ -196,15 +197,6 @@ func (s *Server) Run() {
 	}
 
 	go func() {
-		log.Printf("🚀 Server running on port %s", s.Config.ServerPort)
-		log.Printf("📚 API endpoints available:")
-		log.Printf("   POST /api/auth/register - User registration")
-		log.Printf("   POST /api/auth/login - User login")
-		log.Printf("   GET  /api/profile - Get user profile (protected)")
-		log.Printf("   PUT  /api/profile - Update user profile (protected)")
-		log.Printf("   POST /api/password/change - Change password (protected)")
-		log.Printf("   GET  /api/health - Health check")
-
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to listen: %s", err)
 		}
