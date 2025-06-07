@@ -12,11 +12,11 @@ import (
 
 // AggregatedData - это структура для сбора всех ключевых метрик за период.
 type AggregatedData struct {
-	Revenue      float64
-	OrdersCount  int64
+	Revenue        float64
+	OrdersCount    int64
 	ItemsSoldCount int64
-	ReturnsCount int64
-	ReturnsSum   float64
+	ReturnsCount   int64
+	ReturnsSum     float64
 }
 
 // DashboardRepositoryInterface определяет контракт для работы с дашбордом
@@ -41,23 +41,32 @@ func NewDashboardRepository(db *gorm.DB) *DashboardRepository {
 func (r *DashboardRepository) GetAggregatedData(ctx context.Context, start, end time.Time) (AggregatedData, error) {
 	var result AggregatedData
 
-	// Предполагается, что у заказа есть статус (ordered, returned и т.д.)
-	// и связь с OrderItem.
-	// Этот запрос может потребовать адаптации под вашу реальную схему БД.
+	// ИСПРАВЛЕНИЕ: Запрос разделен на два для эффективности и корректности.
+	// 1. Агрегируем данные из основной таблицы 'orders'.
 	err := r.db.WithContext(ctx).Model(&model.Order{}).
 		Select(`
 			COALESCE(SUM(CASE WHEN status = 'ordered' THEN amount ELSE 0 END), 0) as revenue,
 			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) as orders_count,
-			COALESCE(SUM(CASE WHEN status = 'ordered' THEN (SELECT SUM(quantity) FROM order_items WHERE order_items.order_id = orders.id) ELSE 0 END), 0) as items_sold_count,
 			COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as returns_count,
 			COALESCE(SUM(CASE WHEN status = 'returned' THEN amount ELSE 0 END), 0) as returns_sum
 		`).
 		Where("created_at BETWEEN ? AND ?", start, end).
 		Scan(&result).Error
+	if err != nil {
+		return AggregatedData{}, fmt.Errorf("failed to get aggregated data from orders: %w", err)
+	}
+
+	// 2. Отдельно и эффективно считаем количество проданных товаров.
+	err = r.db.WithContext(ctx).Model(&model.OrderItem{}).
+		Joins("JOIN orders ON orders.id = order_items.order_id").
+		Where("orders.status = ? AND orders.created_at BETWEEN ? AND ?", "ordered", start, end).
+		Select("COALESCE(SUM(order_items.quantity), 0)").
+		Scan(&result.ItemsSoldCount).Error
 
 	if err != nil {
-		return AggregatedData{}, fmt.Errorf("failed to get aggregated data: %w", err)
+		return AggregatedData{}, fmt.Errorf("failed to get items sold count: %w", err)
 	}
+
 	return result, nil
 }
 
@@ -97,7 +106,6 @@ func (r *DashboardRepository) GetHourlySales(ctx context.Context, start, end tim
 	// Функция EXTRACT(HOUR FROM ...) специфична для PostgreSQL.
 	// Для MySQL используйте HOUR(created_at).
 	// Для SQLite используйте strftime('%H', created_at).
-	// Используем gorm.Expr для кросс-платформенности, если это возможно, или пишем сырой SQL.
 	hourExtractor := "EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')" // Пример для PostgreSQL
 
 	err := r.db.WithContext(ctx).Model(&model.Order{}).
@@ -128,7 +136,8 @@ func (r *DashboardRepository) GetSalesChartData(ctx context.Context, start, end 
 		Select(fmt.Sprintf(`
 			%s as timestamp,
 			COALESCE(SUM(CASE WHEN status = 'ordered' THEN amount ELSE 0 END), 0) as orders_revenue,
-			COALESCE(SUM(CASE WHEN status = 'ordered' THEN amount ELSE -amount END), 0) as purchases_revenue,
+			-- ИСПРАВЛЕНИЕ: Корректный расчет выручки с учетом возвратов
+			COALESCE(SUM(CASE WHEN status = 'ordered' THEN amount ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN status = 'returned' THEN amount ELSE 0 END), 0) as purchases_revenue,
 			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) as orders_count,
 			COUNT(DISTINCT CASE WHEN status = 'ordered' THEN id END) - COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as purchases_count,
 			COUNT(DISTINCT CASE WHEN status = 'returned' THEN id END) as return_count,

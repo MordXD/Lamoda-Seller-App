@@ -15,10 +15,10 @@ type StatsRequestParams struct {
 
 // PeriodInfo описывает текущий и предыдущий временные интервалы.
 type PeriodInfo struct {
-	Type            string         `json:"type"`
-	DateFrom        time.Time      `json:"date_from"`
-	DateTo          time.Time      `json:"date_to"`
-	PreviousPeriod  *PreviousPeriod `json:"previous_period,omitempty"`
+	Type           string          `json:"type"`
+	DateFrom       time.Time       `json:"date_from"`
+	DateTo         time.Time       `json:"date_to"`
+	PreviousPeriod *PreviousPeriod `json:"previous_period,omitempty"`
 }
 
 type PreviousPeriod struct {
@@ -53,15 +53,15 @@ type HourlySale struct {
 
 // StatsResponse — это полная структура ответа для эндпоинта статистики.
 type StatsResponse struct {
-	Period          PeriodInfo    `json:"period"`
-	Revenue         Metric        `json:"revenue"`
-	Orders          Metric        `json:"orders"`
-	ItemsSold       Metric        `json:"items_sold"`
-	AvgOrderValue   Metric        `json:"avg_order_value"`
-	ConversionRate  Metric        `json:"conversion_rate"`
-	ReturnRate      Metric        `json:"return_rate"`
-	TopCategories   []TopCategory `json:"top_categories"`
-	HourlySales     []HourlySale  `json:"hourly_sales"`
+	Period         PeriodInfo    `json:"period"`
+	Revenue        Metric        `json:"revenue"`
+	Orders         Metric        `json:"orders"`
+	ItemsSold      Metric        `json:"items_sold"`
+	AvgOrderValue  Metric        `json:"avg_order_value"`
+	ConversionRate Metric        `json:"conversion_rate"`
+	ReturnRate     Metric        `json:"return_rate"`
+	TopCategories  []TopCategory `json:"top_categories"`
+	HourlySales    []HourlySale  `json:"hourly_sales"`
 }
 
 // --- Структуры для /api/dashboard/sales-chart ---
@@ -76,7 +76,7 @@ type SalesChartRequestParams struct {
 // SalesChartDataPoint представляет одну точку на графике.
 type SalesChartDataPoint struct {
 	Date             string    `json:"date"` // "YYYY-MM-DD" или "YYYY-MM-DD HH:00"
-	Timestamp        time.Time `json:"timestamp"`
+	Timestamp        time.Time `json:"-"`    // ИСПРАВЛЕНИЕ: Исключаем из JSON, так как это служебное поле
 	OrdersRevenue    float64   `json:"orders_revenue"`
 	PurchasesRevenue float64   `json:"purchases_revenue"` // Выручка за вычетом возвратов
 	OrdersCount      int64     `json:"orders_count"`

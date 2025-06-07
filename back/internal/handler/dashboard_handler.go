@@ -78,11 +78,15 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		return
 	}
 
-	hourlySalesRaw, err := h.repo.GetHourlySales(ctx, periodInfo.DateFrom, periodInfo.DateTo)
-	if err != nil {
-		log.Printf("ERROR: failed to get hourly sales: %v", err)
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve dashboard statistics"})
-		return
+	var hourlySalesRaw []model.HourlySale
+	// ИСПРАВЛЕНИЕ: Запрашиваем почасовую статистику только для однодневных периодов
+	if periodInfo.DateTo.Sub(periodInfo.DateFrom) < 25*time.Hour {
+		hourlySalesRaw, err = h.repo.GetHourlySales(ctx, periodInfo.DateFrom, periodInfo.DateTo)
+		if err != nil {
+			log.Printf("ERROR: failed to get hourly sales: %v", err)
+			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve dashboard statistics"})
+			return
+		}
 	}
 
 	// 3. Собираем финальный ответ
@@ -95,7 +99,8 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		ConversionRate: model.Metric{}, // ConversionRate требует данных о сессиях, которых нет. Пока заглушка.
 		ReturnRate:     calculateMetric(safeDivide(float64(currentData.ReturnsCount)*100, float64(currentData.OrdersCount)), safeDivide(float64(previousData.ReturnsCount)*100, float64(previousData.OrdersCount))),
 		TopCategories:  topCategories,
-		HourlySales:    fillMissingHours(hourlySalesRaw),
+		// Заполняем пропущенные часы только если данные были запрошены
+		HourlySales: fillMissingHours(hourlySalesRaw),
 	}
 
 	c.JSON(http.StatusOK, response)
@@ -141,7 +146,7 @@ func (h *DashboardHandler) GetSalesChart(c *gin.Context) {
 }
 
 // --- Вспомогательные функции (замена слоя Service) ---
-
+// ... (остальные вспомогательные функции без изменений)
 func calculatePeriods(params model.StatsRequestParams) (*model.PeriodInfo, error) {
 	now := time.Now().UTC()
 	var start, end time.Time
@@ -240,6 +245,9 @@ func safeDivide(numerator, denominator float64) float64 {
 }
 
 func fillMissingHours(sales []model.HourlySale) []model.HourlySale {
+	if sales == nil {
+		return []model.HourlySale{}
+	}
 	salesMap := make(map[int]model.HourlySale, len(sales))
 	for _, s := range sales {
 		salesMap[s.Hour] = s
