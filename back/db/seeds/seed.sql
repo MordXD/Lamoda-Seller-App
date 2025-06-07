@@ -51,9 +51,8 @@ BEGIN
 
 -- === 1. ПОЛЬЗОВАТЕЛИ ===
 INSERT INTO users (id, name, email, hashed_password, balance_kopecks) VALUES
-(user1_id, 'milka', 'iqv@gmail.com', '$2a$10$g20QB8Y2OEhSC15Yaj3OQuYqaGFgbfumn5bHq2LwIq0C.KYfyjRga', 10000000),
-(user2_id, 'Мария Сидорова', 'maria.sidorova@example.com', '$2a$10$...', 5000000)
-ON CONFLICT (id) DO NOTHING;
+(user1_id, 'Иван Петров', 'ivan.petrov@example.com', '$2a$10$...', 10000000),
+(user2_id, 'Мария Сидорова', 'maria.sidorova@example.com', '$2a$10$...', 5000000);
 
 -- === 2. ПОСТАВЩИКИ ===
 INSERT INTO suppliers (id, name, contact) VALUES
