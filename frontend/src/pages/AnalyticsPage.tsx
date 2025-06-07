@@ -1,72 +1,73 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import TabBar from '../components/TabBar';
-
-interface TopProduct {
-  id: string;
-  name: string;
-  salesCount: number;
-  revenue: number;
-  image?: string;
-}
+import { useDashboard } from '../hooks/useDashboard';
+import type { AnalyticsFilters } from '../types/dashboard';
 
 export default function AnalyticsPage() {
-  const [topProducts, setTopProducts] = useState<TopProduct[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [filters, setFilters] = useState<AnalyticsFilters>({ period: 'week' });
+  const { dashboardData, isLoading, error, refetch } = useDashboard(filters);
 
-  useEffect(() => {
-    // Имитация загрузки данных
-    setTimeout(() => {
-      setTopProducts([
-        {
-          id: '1',
-          name: 'Пальто шерстяное классическое',
-          salesCount: 24,
-          revenue: 600000
-        },
-        {
-          id: '2',
-          name: 'Свитер кашемировый оверсайз',
-          salesCount: 18,
-          revenue: 333000
-        },
-        {
-          id: '3',
-          name: 'Джинсы широкие с высокой посадкой',
-          salesCount: 35,
-          revenue: 311500
-        },
-        {
-          id: '4',
-          name: 'Сапоги кожаные на каблуке',
-          salesCount: 22,
-          revenue: 264000
-        },
-        {
-          id: '5',
-          name: 'Куртка пуховая зимняя',
-          salesCount: 16,
-          revenue: 254400
-        }
-      ]);
-      setIsLoading(false);
-    }, 800);
-  }, []);
-
+  const topProducts = dashboardData?.top_products || [];
   const totalRevenue = topProducts.reduce((sum, product) => sum + product.revenue, 0);
-  const totalSales = topProducts.reduce((sum, product) => sum + product.salesCount, 0);
+  const totalSales = topProducts.reduce((sum, product) => sum + product.sales_count, 0);
+
+  const handleRefresh = () => {
+    refetch(filters);
+  };
+
+  const handlePeriodChange = (period: AnalyticsFilters['period']) => {
+    const newFilters = { ...filters, period };
+    setFilters(newFilters);
+    refetch(newFilters);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
-        <h1 className="text-2xl font-bold text-gray-900">Аналитика</h1>
-        <p className="text-sm text-gray-500 mt-1">За последние 7 дней</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Аналитика</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              {filters.period === 'week' ? 'За последние 7 дней' : 
+               filters.period === 'month' ? 'За последний месяц' : 
+               filters.period === 'today' ? 'За сегодня' : 'За выбранный период'}
+            </p>
+          </div>
+          
+          {/* Period Selector */}
+          <div className="flex space-x-2">
+            <select
+              value={filters.period || 'week'}
+              onChange={(e) => handlePeriodChange(e.target.value as AnalyticsFilters['period'])}
+              className="text-sm border border-gray-300 rounded-md px-3 py-1 bg-white"
+            >
+              <option value="today">Сегодня</option>
+              <option value="week">Неделя</option>
+              <option value="month">Месяц</option>
+              <option value="quarter">Квартал</option>
+            </select>
+          </div>
+        </div>
       </header>
 
       {/* Content */}
       <div className="px-4 py-6 space-y-6">
+        {/* Error State */}
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-600 text-sm">{error}</p>
+            <button
+              onClick={handleRefresh}
+              className="mt-2 text-red-700 text-sm font-medium hover:text-red-800"
+            >
+              Попробовать снова
+            </button>
+          </div>
+        )}
+
         {/* Summary Cards */}
-        {!isLoading && (
+        {!isLoading && !error && (
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
               <h3 className="text-sm font-medium text-gray-500 mb-1">Общая выручка</h3>
@@ -139,12 +140,8 @@ export default function AnalyticsPage() {
 
                     {/* Product Info */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">
-                        {product.name}
-                      </h3>
-                      <p className="text-xs text-gray-500">
-                        {product.salesCount} продаж
-                      </p>
+                      <h3 className="text-sm font-medium text-gray-900 truncate">{product.name}</h3>
+                      <p className="text-xs text-gray-500">{product.sales_count} продаж • {product.brand}</p>
                     </div>
 
                     {/* Revenue */}
@@ -153,7 +150,7 @@ export default function AnalyticsPage() {
                         {product.revenue.toLocaleString('ru-RU')} ₽
                       </p>
                       <p className="text-xs text-gray-500">
-                        {Math.round((product.revenue / totalRevenue) * 100)}% от общей
+                        {totalRevenue > 0 ? Math.round((product.revenue / totalRevenue) * 100) : 0}% от общей
                       </p>
                     </div>
                   </div>
@@ -172,6 +169,45 @@ export default function AnalyticsPage() {
           )}
         </div>
 
+        {/* Category Performance */}
+        {dashboardData?.category_performance && dashboardData.category_performance.length > 0 && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100">
+            <div className="p-4 border-b border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900">Производительность категорий</h2>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {dashboardData.category_performance.map((category) => (
+                <div key={category.category} className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-sm font-medium text-gray-900">{category.category}</h3>
+                    <span className={`text-xs px-2 py-1 rounded-full ${
+                      category.growth_percent >= 0 
+                        ? 'bg-green-100 text-green-800' 
+                        : 'bg-red-100 text-red-800'
+                    }`}>
+                      {category.growth_percent >= 0 ? '+' : ''}{category.growth_percent}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <p className="text-gray-500">Продажи</p>
+                      <p className="font-semibold">{category.sales_count} шт</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Выручка</p>
+                      <p className="font-semibold">{category.revenue.toLocaleString('ru-RU')} ₽</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Средний чек</p>
+                      <p className="font-semibold">{category.avg_price.toLocaleString('ru-RU')} ₽</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Additional Analytics Cards */}
         <div className="grid grid-cols-1 gap-4">
           <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
@@ -185,11 +221,17 @@ export default function AnalyticsPage() {
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Конверсия в покупку</span>
-                <span className="text-sm font-semibold text-gray-900">12.5%</span>
+                <span className="text-sm font-semibold text-gray-900">
+                  {dashboardData?.stats?.customers ? 
+                    Math.round((dashboardData.stats.customers.new_today / dashboardData.stats.customers.total_active) * 100) : 0}%
+                </span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Повторные покупки</span>
-                <span className="text-sm font-semibold text-gray-900">28%</span>
+                <span className="text-sm font-semibold text-gray-900">
+                  {dashboardData?.stats?.customers ? 
+                    Math.round((dashboardData.stats.customers.returning / dashboardData.stats.customers.total_active) * 100) : 0}%
+                </span>
               </div>
             </div>
           </div>

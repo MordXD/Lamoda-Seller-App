@@ -1,16 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import OrderItem from '../components/OrderItem';
 import TabBar from '../components/TabBar';
+import { useOrders } from '../hooks/useOrders';
+import type { OrdersFilters } from '../types/order';
 
 type OrderStatus = 'new' | 'in_transit' | 'archive';
-
-interface Order {
-  id: string;
-  date: string;
-  amount: number;
-  status: string;
-  firstProductImage?: string;
-}
 
 interface SummaryData {
   title: string;
@@ -20,11 +15,25 @@ interface SummaryData {
 }
 
 export default function OrdersPage() {
+  const navigate = useNavigate();
   const [activeSegment, setActiveSegment] = useState<OrderStatus>('new');
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [summary, setSummary] = useState<SummaryData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Маппинг сегментов на статусы API
+  const getApiFilters = (segment: OrderStatus): OrdersFilters => {
+    switch (segment) {
+      case 'new':
+        return { status: 'new' };
+      case 'in_transit':
+        return { status: 'in_transit' };
+      case 'archive':
+        return { status: 'delivered' }; // или можно добавить несколько статусов
+      default:
+        return {};
+    }
+  };
+
+  const { orders, isLoading, error, summary, refetch } = useOrders(getApiFilters(activeSegment));
 
   const segments = [
     { id: 'new' as OrderStatus, label: 'Новые' },
@@ -32,68 +41,48 @@ export default function OrdersPage() {
     { id: 'archive' as OrderStatus, label: 'Архив' }
   ];
 
-  const loadOrders = async (segment: OrderStatus, showLoader = true) => {
-    if (showLoader) setIsLoading(true);
-    
-    // Имитация загрузки данных
-    await new Promise(resolve => setTimeout(resolve, 800));
-    
-    const mockOrders: Record<OrderStatus, Order[]> = {
-      new: [
-        { id: '12345-001', date: '2024-01-21', amount: 15000, status: 'Ожидает сборки' },
-        { id: '12346-002', date: '2024-01-21', amount: 8500, status: 'Подтверждён' },
-        { id: '12347-003', date: '2024-01-20', amount: 22000, status: 'Оплачен' }
-      ],
-      in_transit: [
-        { id: '12340-001', date: '2024-01-19', amount: 12000, status: 'В доставке' },
-        { id: '12341-002', date: '2024-01-18', amount: 9800, status: 'Передан курьеру' }
-      ],
-      archive: [
-        { id: '12330-001', date: '2024-01-15', amount: 18000, status: 'Доставлен' },
-        { id: '12331-002', date: '2024-01-14', amount: 25000, status: 'Выкуплен' },
-        { id: '12332-003', date: '2024-01-13', amount: 7200, status: 'Возврат' }
-      ]
+  // Создаем данные для summary на основе API ответа
+  const getSummaryData = (segment: OrderStatus): SummaryData => {
+    const summaryTitles = {
+      new: 'Новые заказы',
+      in_transit: 'Заказы в пути',
+      archive: 'Архивные заказы'
     };
 
-    const mockSummaries: Record<OrderStatus, SummaryData> = {
-      new: {
-        title: 'Новые заказы',
-        description: 'Требуют обработки и подтверждения',
-        count: 3,
-        totalAmount: 45500
-      },
-      in_transit: {
-        title: 'Заказы в пути',
-        description: 'Находятся в процессе доставки',
-        count: 2,
-        totalAmount: 21800
-      },
-      archive: {
-        title: 'Архивные заказы',
-        description: 'Завершённые и отменённые заказы',
-        count: 3,
-        totalAmount: 50200
-      }
+    const summaryDescriptions = {
+      new: 'Требуют обработки и подтверждения',
+      in_transit: 'Находятся в процессе доставки',
+      archive: 'Завершённые и отменённые заказы'
     };
 
-    setOrders(mockOrders[segment]);
-    setSummary(mockSummaries[segment]);
-    setIsLoading(false);
-    setRefreshing(false);
+    return {
+      title: summaryTitles[segment],
+      description: summaryDescriptions[segment],
+      count: summary?.total_orders || 0,
+      totalAmount: summary?.total_amount || 0
+    };
   };
 
-  useEffect(() => {
-    loadOrders(activeSegment);
-  }, [activeSegment]);
-
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    loadOrders(activeSegment, false);
+    try {
+      await refetch(getApiFilters(activeSegment));
+    } finally {
+      setRefreshing(false);
+    }
   };
 
-  const handleSegmentChange = (segment: OrderStatus) => {
+  const handleSegmentChange = async (segment: OrderStatus) => {
     setActiveSegment(segment);
+    // Загружаем данные для нового сегмента
+    await refetch(getApiFilters(segment));
   };
+
+  const handleOrderClick = (orderId: string) => {
+    navigate(`/orders/${orderId}`);
+  };
+
+  const summaryData = getSummaryData(activeSegment);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -122,18 +111,31 @@ export default function OrdersPage() {
       </div>
 
       {/* Summary Block */}
-      {summary && !isLoading && (
+      {!isLoading && !error && summary && (
         <div className="bg-white mx-4 mt-4 rounded-lg p-4 shadow-sm border border-gray-100">
-          <h3 className="text-lg font-semibold text-gray-900 mb-1">{summary.title}</h3>
-          <p className="text-sm text-gray-600 mb-2">{summary.description}</p>
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">{summaryData.title}</h3>
+          <p className="text-sm text-gray-600 mb-2">{summaryData.description}</p>
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-500">
-              {summary.count} {summary.count === 1 ? 'заказ' : summary.count < 5 ? 'заказа' : 'заказов'}
+              {summaryData.count} {summaryData.count === 1 ? 'заказ' : summaryData.count < 5 ? 'заказа' : 'заказов'}
             </span>
             <span className="text-lg font-semibold text-gray-900">
-              {summary.totalAmount.toLocaleString('ru-RU')} ₽
+              {summaryData.totalAmount.toLocaleString('ru-RU')} ₽
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Error State */}
+      {error && (
+        <div className="mx-4 mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-600 text-sm">{error}</p>
+          <button
+            onClick={handleRefresh}
+            className="mt-2 text-red-700 text-sm font-medium hover:text-red-800"
+          >
+            Попробовать снова
+          </button>
         </div>
       )}
 
@@ -167,8 +169,14 @@ export default function OrdersPage() {
             {orders.map((order) => (
               <OrderItem
                 key={order.id}
-                order={order}
-                onClick={() => console.log('Order clicked:', order.id)}
+                order={{
+                  id: order.order_number,
+                  date: order.date,
+                  amount: order.totals.total,
+                  status: order.status,
+                  firstProductImage: order.items[0]?.image
+                }}
+                onClick={() => handleOrderClick(order.id)}
               />
             ))}
             

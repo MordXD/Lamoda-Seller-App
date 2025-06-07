@@ -23,7 +23,7 @@ export interface LoginResponse {
 }
 
 export interface LoginData {
-  email: string;
+  username_or_email: string;
   password: string;
 }
 
@@ -32,7 +32,7 @@ export interface AuthContextType {
   activeAccount: Account | null;
   isLoading: boolean;
   isInitialized: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (usernameOrEmail: string, password: string) => Promise<void>;
   logout: () => void;
   switchAccount: (accountId: string) => void;
   addAccount: (account: Account) => void;

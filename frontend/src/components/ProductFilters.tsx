@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getCategories } from '../api/products';
-import type { ProductsFilters, Category } from '../types/product';
+import type { ProductsFilters } from '../types/product';
 
 interface ProductFiltersProps {
   filters: ProductsFilters;
@@ -14,21 +13,7 @@ interface ProductFiltersProps {
 
 export default function ProductFilters({ filters, onFiltersChange, availableFilters }: ProductFiltersProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [categories, setCategories] = useState<Category[]>([]);
   const [localFilters, setLocalFilters] = useState<ProductsFilters>(filters);
-
-  useEffect(() => {
-    const loadCategories = async () => {
-      try {
-        const response = await getCategories();
-        setCategories(response.categories);
-      } catch (error) {
-        console.error('Ошибка загрузки категорий:', error);
-      }
-    };
-
-    loadCategories();
-  }, []);
 
   useEffect(() => {
     setLocalFilters(filters);
