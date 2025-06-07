@@ -1,78 +1,48 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ProductItem from '../components/ProductItem';
+import ProductFilters from '../components/ProductFilters';
 import TabBar from '../components/TabBar';
-
-interface Product {
-  id: string;
-  name: string;
-  price: number;
-  stock: number;
-  image?: string;
-}
+import { useProducts } from '../hooks/useProducts';
+import type { ProductsFilters } from '../types/product';
 
 export default function ProductsPage() {
-  const [products, setProducts] = useState<Product[]>([]);
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  const [filteredProducts, setFilteredProducts] = useState<Product[]>([]);
-
-  const mockProducts: Product[] = [
-    {
-      id: '1',
-      name: 'Пальто шерстяное классическое',
-      price: 25000,
-      stock: 5
-    },
-    {
-      id: '2',
-      name: 'Джинсы широкие с высокой посадкой',
-      price: 8900,
-      stock: 15
-    },
-    {
-      id: '3',
-      name: 'Свитер кашемировый оверсайз',
-      price: 18500,
-      stock: 3
-    },
-    {
-      id: '4',
-      name: 'Сапоги кожаные на каблуке',
-      price: 12000,
-      stock: 8
-    },
-    {
-      id: '5',
-      name: 'Платье миди с принтом',
-      price: 6800,
-      stock: 20
-    },
-    {
-      id: '6',
-      name: 'Куртка пуховая зимняя',
-      price: 15900,
-      stock: 2
-    }
-  ];
-
-  useEffect(() => {
-    // Имитация загрузки
-    setTimeout(() => {
-      setProducts(mockProducts);
-      setIsLoading(false);
-    }, 800);
-  }, []);
+  const [currentFilters, setCurrentFilters] = useState<ProductsFilters>({});
+  const { products, isLoading, error, pagination, filters: availableFilters, refetch } = useProducts();
+  const [filteredProducts, setFilteredProducts] = useState(products);
 
   useEffect(() => {
     if (searchQuery.trim()) {
       const filtered = products.filter(product =>
-        product.name.toLowerCase().includes(searchQuery.toLowerCase())
+        product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        product.sku.toLowerCase().includes(searchQuery.toLowerCase())
       );
       setFilteredProducts(filtered);
     } else {
       setFilteredProducts(products);
     }
   }, [searchQuery, products]);
+
+  const handleProductClick = (productId: string) => {
+    navigate(`/products/${productId}`);
+  };
+
+  const handleFiltersChange = async (newFilters: ProductsFilters) => {
+    setCurrentFilters(newFilters);
+    await refetch(newFilters);
+  };
+
+  const handleSearch = async () => {
+    if (searchQuery.trim()) {
+      const searchFilters = { ...currentFilters, search: searchQuery.trim() };
+      await refetch(searchFilters);
+    } else {
+      await refetch(currentFilters);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -81,7 +51,7 @@ export default function ProductsPage() {
         <h1 className="text-2xl font-bold text-gray-900 mb-4">Товары</h1>
         
         {/* Search */}
-        <div className="relative">
+        <div className="relative mb-4">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
             <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
@@ -89,14 +59,18 @@ export default function ProductsPage() {
           </div>
           <input
             type="text"
-            placeholder="Поиск по названию или артикулу"
+            placeholder="Поиск по названию, бренду или артикулу"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
             className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-500 focus:border-transparent"
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery('')}
+              onClick={() => {
+                setSearchQuery('');
+                refetch(currentFilters);
+              }}
               className="absolute inset-y-0 right-0 pr-3 flex items-center"
             >
               <svg className="h-5 w-5 text-gray-400 hover:text-gray-600" fill="currentColor" viewBox="0 0 20 20">
@@ -105,6 +79,32 @@ export default function ProductsPage() {
             </button>
           )}
         </div>
+
+        {/* Filters */}
+        <div className="flex items-center justify-between">
+          <ProductFilters
+            filters={currentFilters}
+            onFiltersChange={handleFiltersChange}
+            availableFilters={availableFilters || undefined}
+          />
+          
+          {/* Results count */}
+          {pagination && (
+            <span className="text-sm text-gray-600">
+              {pagination.total} {
+                pagination.total === 1 ? 'товар' : 
+                pagination.total < 5 ? 'товара' : 'товаров'
+              }
+            </span>
+          )}
+        </div>
+        
+        {/* Error message */}
+        {error && (
+          <div className="mt-3 bg-red-50 border border-red-200 rounded-lg p-3">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+        )}
       </header>
 
       {/* Content */}
@@ -143,7 +143,7 @@ export default function ProductsPage() {
               <ProductItem
                 key={product.id}
                 product={product}
-                onClick={() => console.log('Product clicked:', product.id)}
+                onClick={() => handleProductClick(product.id)}
               />
             ))}
           </div>
@@ -156,7 +156,10 @@ export default function ProductsPage() {
             <h3 className="text-lg font-medium text-gray-900 mb-2">Ничего не найдено</h3>
             <p className="text-gray-500 mb-4">Попробуйте изменить запрос поиска</p>
             <button
-              onClick={() => setSearchQuery('')}
+              onClick={() => {
+                setSearchQuery('');
+                refetch(currentFilters);
+              }}
               className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
             >
               Показать все товары
