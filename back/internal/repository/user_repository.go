@@ -18,6 +18,8 @@ type UserRepositoryInterface interface {
 	Create(ctx context.Context, user *model.User) error
 	FindByEmail(ctx context.Context, email string) (*model.User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.User, error)
+	Update(ctx context.Context, user *model.User) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 var _ UserRepositoryInterface = (*UserRepository)(nil)
@@ -46,4 +48,12 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.User
 		return nil, nil
 	}
 	return &user, err
+}
+
+func (r *UserRepository) Update(ctx context.Context, user *model.User) error {
+	return r.db.WithContext(ctx).Save(user).Error
+}
+
+func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	return r.db.WithContext(ctx).Delete(&model.User{}, "id = ?", id).Error
 }

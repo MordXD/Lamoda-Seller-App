@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/lamoda-seller-app/internal/middleware"
 	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
 
@@ -36,24 +37,34 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type UpdateProfileRequest struct {
+	Name  string `json:"name" binding:"required"`
+	Email string `json:"email" binding:"required,email"`
+}
+
 type AuthResponse struct {
 	Token string      `json:"token"`
 	User  UserDetails `json:"user"`
 }
 
 type UserDetails struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	ID        string    `json:"id"`
+	Email     string    `json:"email"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request",
+			"details": err.Error(),
+		})
 		return
 	}
 
+	// Check if user already exists
 	existingUser, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check user existence"})
@@ -65,12 +76,14 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
 		return
 	}
 
+	// Create user
 	user := &model.User{
 		Name:           req.Name,
 		Email:          req.Email,
@@ -82,6 +95,7 @@ func (h *UserHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// Generate token
 	token, err := generateToken(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
@@ -91,9 +105,10 @@ func (h *UserHandler) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, AuthResponse{
 		Token: token,
 		User: UserDetails{
-			ID:    user.ID.String(),
-			Email: user.Email,
-			Name:  user.Name,
+			ID:        user.ID.String(),
+			Email:     user.Email,
+			Name:      user.Name,
+			CreatedAt: user.CreatedAt,
 		},
 	})
 }
@@ -101,10 +116,14 @@ func (h *UserHandler) Register(c *gin.Context) {
 func (h *UserHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request",
+			"details": err.Error(),
+		})
 		return
 	}
 
+	// Find user by email
 	user, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
@@ -116,11 +135,13 @@ func (h *UserHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Verify password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.HashedPassword), []byte(req.Password)); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
+	// Generate token
 	token, err := generateToken(user.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
@@ -130,10 +151,112 @@ func (h *UserHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, AuthResponse{
 		Token: token,
 		User: UserDetails{
-			ID:    user.ID.String(),
-			Email: user.Email,
-			Name:  user.Name,
+			ID:        user.ID.String(),
+			Email:     user.Email,
+			Name:      user.Name,
+			CreatedAt: user.CreatedAt,
 		},
+	})
+}
+
+func (h *UserHandler) GetProfile(c *gin.Context) {
+	// Get user ID from JWT middleware
+	userID, exists := c.Get(middleware.UserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in token"})
+		return
+	}
+
+	userUUID, ok := userID.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	// Get user from database
+	user, err := h.userRepo.GetByID(c.Request.Context(), userUUID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user profile"})
+		return
+	}
+
+	if user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, UserDetails{
+		ID:        user.ID.String(),
+		Email:     user.Email,
+		Name:      user.Name,
+		CreatedAt: user.CreatedAt,
+	})
+}
+
+func (h *UserHandler) UpdateProfile(c *gin.Context) {
+	// Get user ID from JWT middleware
+	userID, exists := c.Get(middleware.UserIDKey)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in token"})
+		return
+	}
+
+	userUUID, ok := userID.(uuid.UUID)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	var req UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	// Get current user
+	user, err := h.userRepo.GetByID(c.Request.Context(), userUUID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user"})
+		return
+	}
+
+	if user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Check if email is being changed and if it's already taken
+	if req.Email != user.Email {
+		existingUser, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check email availability"})
+			return
+		}
+
+		if existingUser != nil && existingUser.ID != userUUID {
+			c.JSON(http.StatusConflict, gin.H{"error": "Email is already taken"})
+			return
+		}
+	}
+
+	// Update user fields
+	user.Name = req.Name
+	user.Email = req.Email
+
+	// Save updated user
+	if err := h.userRepo.Update(c.Request.Context(), user); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
+		return
+	}
+
+	c.JSON(http.StatusOK, UserDetails{
+		ID:        user.ID.String(),
+		Email:     user.Email,
+		Name:      user.Name,
+		CreatedAt: user.CreatedAt,
 	})
 }
 
@@ -145,7 +268,8 @@ func generateToken(userID uuid.UUID) (string, error) {
 
 	claims := jwt.MapClaims{
 		"user_id": userID.String(),
-		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(),
+		"exp":     time.Now().Add(time.Hour * 24 * 7).Unix(), // 7 days
+		"iat":     time.Now().Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

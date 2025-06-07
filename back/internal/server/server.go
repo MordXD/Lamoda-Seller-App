@@ -17,6 +17,7 @@ import (
 	"github.com/lamoda-seller-app/internal/config"
 	"github.com/lamoda-seller-app/internal/handler"
 	"github.com/lamoda-seller-app/internal/middleware"
+	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
 )
 
@@ -35,24 +36,66 @@ func Init(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("❌ failed to connect to DB: %w", err)
 	}
-	log.Println("✅ Connected to database")
+
+	// Auto-migrate database tables
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		return nil, fmt.Errorf("❌ failed to migrate database: %w", err)
+	}
+
+	log.Println("✅ Connected to database and migrated tables")
 
 	// Setup Gin
 	r := gin.Default()
 
+	// Add CORS middleware for frontend integration
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	})
+
+	// Health check endpoint
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":    "ok",
+			"timestamp": time.Now().UTC(),
+		})
+	})
+
 	// Initialize repositories
+	userRepo := repository.NewUserRepository(db)
 
-	//TODO: Initialize handlers
-
+	// Initialize handlers
+	userHandler := handler.NewUserHandler(userRepo)
 
 	// Public routes
+	auth := r.Group("/auth")
+	{
+		auth.POST("/register", userHandler.Register)
+		auth.POST("/login", userHandler.Login)
+	}
 
 	// Protected routes - require authentication
-	authorized := r.Group("/")
+	authorized := r.Group("/api")
 	authorized.Use(middleware.JWTAuthMiddleware(cfg.JWTSecret))
 	{
-		//TODO: routes
+		// User profile endpoints
+		authorized.GET("/profile", userHandler.GetProfile)
+		authorized.PUT("/profile", userHandler.UpdateProfile)
+		
+		// Add more protected routes here as needed
+		// authorized.GET("/dashboard", dashboardHandler.GetDashboard)
+		// authorized.POST("/tasks", taskHandler.CreateTask)
 	}
+
 	return &Server{
 		Engine: r,
 		DB:     db,
@@ -68,7 +111,13 @@ func (s *Server) Run() {
 
 	go func() {
 		log.Printf("🚀 Server running on port %s\n", s.Config.ServerPort)
-		log.Printf("📚 Swagger documentation available at http://localhost:%s/swagger/index.html\n", s.Config.ServerPort)
+		log.Printf("📚 API endpoints available:\n")
+		log.Printf("   POST /auth/register - User registration\n")
+		log.Printf("   POST /auth/login - User login\n")
+		log.Printf("   GET  /api/profile - Get user profile (protected)\n")
+		log.Printf("   PUT  /api/profile - Update user profile (protected)\n")
+		log.Printf("   GET  /health - Health check\n")
+		
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("❌ Failed to listen: %s\n", err)
 		}
