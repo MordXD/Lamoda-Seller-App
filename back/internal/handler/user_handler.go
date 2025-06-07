@@ -3,12 +3,14 @@ package handler
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lamoda-seller-app/internal/auth"
 	"github.com/lamoda-seller-app/internal/middleware"
 	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
+	"github.com/lamoda-seller-app/internal/validation"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -16,29 +18,31 @@ import (
 )
 
 type UserHandler struct {
-	userRepo *repository.UserRepository
+	userRepo  *repository.UserRepository
+	validator *validation.UserValidator
 }
 
 func NewUserHandler(userRepo *repository.UserRepository) *UserHandler {
 	return &UserHandler{
-		userRepo: userRepo,
+		userRepo:  userRepo,
+		validator: validation.NewUserValidator(),
 	}
 }
 
 type RegisterRequest struct {
-	Name     string `json:"name" binding:"required,min=2,max=100"`
-	Email    string `json:"email" binding:"required,email,max=255"`
-	Password string `json:"password" binding:"required,min=8,max=128"`
+	Name     string `json:"name" binding:"required"`
+	Email    string `json:"email" binding:"required"`
+	Password string `json:"password" binding:"required"`
 }
 
 type LoginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
+	Email    string `json:"email" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
 type UpdateProfileRequest struct {
-	Name  string `json:"name" binding:"required,min=2,max=100"`
-	Email string `json:"email" binding:"required,email,max=255"`
+	Name  string `json:"name" binding:"required"`
+	Email string `json:"email" binding:"required"`
 }
 
 type ValidateTokenRequest struct {
@@ -66,18 +70,35 @@ type AccountInfo struct {
 	User  UserDetails `json:"user"`
 }
 
-// Existing methods...
+type ValidationErrorResponse struct {
+	Error  string                      `json:"error"`
+	Fields []validation.ValidationError `json:"fields,omitempty"`
+}
+
 func (h *UserHandler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+		c.JSON(http.StatusBadRequest, ValidationErrorResponse{
+			Error: "Invalid request data",
 		})
 		return
 	}
 
+	// Comprehensive validation
+	validationErrors := h.validator.ValidateRegistration(req.Name, req.Email, req.Password)
+	if validationErrors.HasErrors() {
+		c.JSON(http.StatusBadRequest, ValidationErrorResponse{
+			Error:  "Validation failed",
+			Fields: validationErrors,
+		})
+		return
+	}
+
+	// Normalize email (trim and lowercase)
+	normalizedEmail := strings.ToLower(strings.TrimSpace(req.Email))
+
 	// Check if user already exists
-	existingUser, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
+	existingUser, err := h.userRepo.FindByEmail(c.Request.Context(), normalizedEmail)
 	if err != nil {
 		log.Printf("Error checking user existence: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
@@ -85,12 +106,17 @@ func (h *UserHandler) Register(c *gin.Context) {
 	}
 
 	if existingUser != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "User with this email already exists"})
+		c.JSON(http.StatusConflict, ValidationErrorResponse{
+			Error: "User with this email already exists",
+			Fields: []validation.ValidationError{
+				{Field: "email", Message: "This email is already registered"},
+			},
+		})
 		return
 	}
 
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	// Hash password with higher cost for better security
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		log.Printf("Error hashing password: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
@@ -99,13 +125,25 @@ func (h *UserHandler) Register(c *gin.Context) {
 
 	// Create user
 	user := &model.User{
-		Name:           req.Name,
-		Email:          req.Email,
+		Name:           strings.TrimSpace(req.Name),
+		Email:          normalizedEmail,
 		HashedPassword: string(hashedPassword),
 	}
 
 	if err := h.userRepo.Create(c.Request.Context(), user); err != nil {
 		log.Printf("Error creating user: %v", err)
+		
+		// Check if it's a duplicate email error
+		if strings.Contains(err.Error(), "uni_users_email") {
+			c.JSON(http.StatusConflict, ValidationErrorResponse{
+				Error: "User with this email already exists",
+				Fields: []validation.ValidationError{
+					{Field: "email", Message: "This email is already registered"},
+				},
+			})
+			return
+		}
+		
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
@@ -132,14 +170,27 @@ func (h *UserHandler) Register(c *gin.Context) {
 func (h *UserHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+		c.JSON(http.StatusBadRequest, ValidationErrorResponse{
+			Error: "Invalid request data",
 		})
 		return
 	}
 
+	// Basic email validation for login
+	emailErrors := h.validator.EmailValidator.ValidateEmail(req.Email)
+	if emailErrors.HasErrors() {
+		c.JSON(http.StatusBadRequest, ValidationErrorResponse{
+			Error:  "Invalid email format",
+			Fields: emailErrors,
+		})
+		return
+	}
+
+	// Normalize email
+	normalizedEmail := strings.ToLower(strings.TrimSpace(req.Email))
+
 	// Find user by email
-	user, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
+	user, err := h.userRepo.FindByEmail(c.Request.Context(), normalizedEmail)
 	if err != nil {
 		log.Printf("Error finding user: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
@@ -176,7 +227,6 @@ func (h *UserHandler) Login(c *gin.Context) {
 	})
 }
 
-// NEW: Validate token and return user info
 func (h *UserHandler) ValidateToken(c *gin.Context) {
 	var req ValidateTokenRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -217,7 +267,6 @@ func (h *UserHandler) ValidateToken(c *gin.Context) {
 	})
 }
 
-// NEW: Get all accounts for current session (validate multiple tokens)
 func (h *UserHandler) ValidateMultipleTokens(c *gin.Context) {
 	var tokens struct {
 		Tokens []string `json:"tokens" binding:"required"`
@@ -312,8 +361,18 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 
 	var req UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Invalid request data",
+		c.JSON(http.StatusBadRequest, ValidationErrorResponse{
+			Error: "Invalid request data",
+		})
+		return
+	}
+
+	// Validate profile update data
+	validationErrors := h.validator.ValidateProfileUpdate(req.Name, req.Email)
+	if validationErrors.HasErrors() {
+		c.JSON(http.StatusBadRequest, ValidationErrorResponse{
+			Error:  "Validation failed",
+			Fields: validationErrors,
 		})
 		return
 	}
@@ -331,9 +390,12 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
+	// Normalize email
+	normalizedEmail := strings.ToLower(strings.TrimSpace(req.Email))
+
 	// Check if email is being changed and if it's already taken
-	if req.Email != user.Email {
-		existingUser, err := h.userRepo.FindByEmail(c.Request.Context(), req.Email)
+	if normalizedEmail != user.Email {
+		existingUser, err := h.userRepo.FindByEmail(c.Request.Context(), normalizedEmail)
 		if err != nil {
 			log.Printf("Error checking email availability: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
@@ -341,18 +403,35 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		}
 
 		if existingUser != nil && existingUser.ID != userUUID {
-			c.JSON(http.StatusConflict, gin.H{"error": "Email is already taken"})
+			c.JSON(http.StatusConflict, ValidationErrorResponse{
+				Error: "Email is already taken",
+				Fields: []validation.ValidationError{
+					{Field: "email", Message: "This email is already registered"},
+				},
+			})
 			return
 		}
 	}
 
 	// Update user fields
-	user.Name = req.Name
-	user.Email = req.Email
+	user.Name = strings.TrimSpace(req.Name)
+	user.Email = normalizedEmail
 
 	// Save updated user
 	if err := h.userRepo.Update(c.Request.Context(), user); err != nil {
 		log.Printf("Error updating profile: %v", err)
+		
+		// Check if it's a duplicate email error
+		if strings.Contains(err.Error(), "uni_users_email") {
+			c.JSON(http.StatusConflict, ValidationErrorResponse{
+				Error: "Email is already taken",
+				Fields: []validation.ValidationError{
+					{Field: "email", Message: "This email is already registered"},
+				},
+			})
+			return
+		}
+		
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
 		return
 	}
@@ -363,4 +442,4 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		Name:      user.Name,
 		CreatedAt: user.CreatedAt,
 	})
-}
+} 	
