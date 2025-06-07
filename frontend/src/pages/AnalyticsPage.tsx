@@ -7,9 +7,9 @@ export default function AnalyticsPage() {
   const [filters, setFilters] = useState<AnalyticsFilters>({ period: 'week' });
   const { dashboardData, isLoading, error, refetch } = useDashboard(filters);
 
-  const topProducts = dashboardData?.top_products || [];
-  const totalRevenue = topProducts.reduce((sum, product) => sum + product.revenue, 0);
-  const totalSales = topProducts.reduce((sum, product) => sum + product.sales_count, 0);
+  const topCategories = dashboardData?.top_categories || [];
+  const totalRevenue = topCategories.reduce((sum, category) => sum + category.revenue, 0);
+  const totalOrders = topCategories.reduce((sum, category) => sum + category.orders, 0);
 
   const handleRefresh = () => {
     refetch(filters);
@@ -76,18 +76,18 @@ export default function AnalyticsPage() {
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
-              <h3 className="text-sm font-medium text-gray-500 mb-1">Продано товаров</h3>
+              <h3 className="text-sm font-medium text-gray-500 mb-1">Количество заказов</h3>
               <p className="text-2xl font-bold text-gray-900">
-                {totalSales} шт
+                {totalOrders} шт
               </p>
             </div>
           </div>
         )}
 
-        {/* Top Products Widget */}
+        {/* Top Categories Widget */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-100">
           <div className="p-4 border-b border-gray-100">
-            <h2 className="text-lg font-semibold text-gray-900">Топ-5 товаров</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Топ-5 категорий</h2>
             <p className="text-sm text-gray-500">Отсортированы по выручке</p>
           </div>
 
@@ -109,10 +109,10 @@ export default function AnalyticsPage() {
                 </div>
               ))}
             </div>
-          ) : topProducts.length > 0 ? (
+          ) : topCategories.length > 0 ? (
             <div className="divide-y divide-gray-100">
-              {topProducts.map((product, index) => (
-                <div key={product.id} className="p-4 hover:bg-gray-50 transition-colors">
+              {topCategories.map((category, index) => (
+                <div key={category.category} className="p-4 hover:bg-gray-50 transition-colors">
                   <div className="flex items-center space-x-4">
                     {/* Rank */}
                     <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
@@ -121,36 +121,28 @@ export default function AnalyticsPage() {
                       </span>
                     </div>
 
-                    {/* Product Image */}
+                    {/* Category Icon */}
                     <div className="w-12 h-12 bg-gray-200 rounded-lg flex-shrink-0 overflow-hidden">
-                      {product.image ? (
-                        <img 
-                          src={product.image} 
-                          alt={product.name} 
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-400">
-                          <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-                          </svg>
-                        </div>
-                      )}
+                      <div className="w-full h-full flex items-center justify-center text-gray-400">
+                        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
+                        </svg>
+                      </div>
                     </div>
 
-                    {/* Product Info */}
+                    {/* Category Info */}
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">{product.name}</h3>
-                      <p className="text-xs text-gray-500">{product.sales_count} продаж • {product.brand}</p>
+                      <h3 className="text-sm font-medium text-gray-900 truncate">{category.name}</h3>
+                      <p className="text-xs text-gray-500">{category.orders} заказов • {category.items} товаров</p>
                     </div>
 
                     {/* Revenue */}
                     <div className="text-right flex-shrink-0">
                       <p className="text-sm font-semibold text-gray-900">
-                        {product.revenue.toLocaleString('ru-RU')} ₽
+                        {category.revenue.toLocaleString('ru-RU')} ₽
                       </p>
                       <p className="text-xs text-gray-500">
-                        {totalRevenue > 0 ? Math.round((product.revenue / totalRevenue) * 100) : 0}% от общей
+                        {totalRevenue > 0 ? Math.round((category.revenue / totalRevenue) * 100) : 0}% от общей
                       </p>
                     </div>
                   </div>
@@ -169,73 +161,40 @@ export default function AnalyticsPage() {
           )}
         </div>
 
-        {/* Category Performance */}
-        {dashboardData?.category_performance && dashboardData.category_performance.length > 0 && (
+        {/* Additional Stats */}
+        {!isLoading && !error && (
           <div className="bg-white rounded-lg shadow-sm border border-gray-100">
             <div className="p-4 border-b border-gray-100">
-              <h2 className="text-lg font-semibold text-gray-900">Производительность категорий</h2>
+              <h2 className="text-lg font-semibold text-gray-900">Дополнительная статистика</h2>
             </div>
-            <div className="divide-y divide-gray-100">
-              {dashboardData.category_performance.map((category) => (
-                <div key={category.category} className="p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-medium text-gray-900">{category.category}</h3>
-                    <span className={`text-xs px-2 py-1 rounded-full ${
-                      category.growth_percent >= 0 
-                        ? 'bg-green-100 text-green-800' 
-                        : 'bg-red-100 text-red-800'
-                    }`}>
-                      {category.growth_percent >= 0 ? '+' : ''}{category.growth_percent}%
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="text-gray-500">Продажи</p>
-                      <p className="font-semibold">{category.sales_count} шт</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Выручка</p>
-                      <p className="font-semibold">{category.revenue.toLocaleString('ru-RU')} ₽</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Средний чек</p>
-                      <p className="font-semibold">{category.avg_price.toLocaleString('ru-RU')} ₽</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className="p-4 grid grid-cols-2 gap-4">
+              <div className="text-center">
+                <span className="text-sm text-gray-600">Общая выручка</span>
+                <span className="text-lg font-semibold text-gray-900 block">
+                  {dashboardData?.revenue?.current?.toLocaleString('ru-RU') || 0} ₽
+                </span>
+              </div>
+              <div className="text-center">
+                <span className="text-sm text-gray-600">Общее количество заказов</span>
+                <span className="text-lg font-semibold text-gray-900 block">
+                  {dashboardData?.orders?.current || 0} шт
+                </span>
+              </div>
+              <div className="text-center">
+                <span className="text-sm text-gray-600">Средний чек</span>
+                <span className="text-lg font-semibold text-gray-900 block">
+                  {dashboardData?.avg_order_value?.current?.toLocaleString('ru-RU') || 0} ₽
+                </span>
+              </div>
+              <div className="text-center">
+                <span className="text-sm text-gray-600">Товаров продано</span>
+                <span className="text-lg font-semibold text-gray-900 block">
+                  {dashboardData?.items_sold?.current || 0} шт
+                </span>
+              </div>
             </div>
           </div>
         )}
-
-        {/* Additional Analytics Cards */}
-        <div className="grid grid-cols-1 gap-4">
-          <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">Ключевые метрики</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Средний чек</span>
-                <span className="text-sm font-semibold text-gray-900">
-                  {totalSales > 0 ? Math.round(totalRevenue / totalSales).toLocaleString('ru-RU') : 0} ₽
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Конверсия в покупку</span>
-                <span className="text-sm font-semibold text-gray-900">
-                  {dashboardData?.stats?.customers ? 
-                    Math.round((dashboardData.stats.customers.new_today / dashboardData.stats.customers.total_active) * 100) : 0}%
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-600">Повторные покупки</span>
-                <span className="text-sm font-semibold text-gray-900">
-                  {dashboardData?.stats?.customers ? 
-                    Math.round((dashboardData.stats.customers.returning / dashboardData.stats.customers.total_active) * 100) : 0}%
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <TabBar />

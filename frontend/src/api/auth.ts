@@ -14,22 +14,22 @@ export interface RegisterResponse {
   email: string;
 }
 
-// Интерфейсы для авторизации - поддержка username или email
+// Интерфейсы для авторизации - только email
 export interface LoginData {
-  username_or_email: string; // Может быть как username, так и email
+  email: string; // Бэкенд ожидает именно email
   password: string;
 }
 
 export interface LoginResponse {
   token: string;
-  expires_in: number;
-  user: {
+  expires_in?: number;
+  user?: {
     id: string;
     email: string;
     name: string;
-    shop_name: string;
-    is_verified: boolean;
-    registration_date: string;
+    shop_name?: string;
+    is_verified?: boolean;
+    registration_date?: string;
   };
 }
 
@@ -44,10 +44,24 @@ export const register = async (data: RegisterData): Promise<RegisterResponse> =>
   return response.data;
 };
 
-// Авторизация - username или email + пароль
+// Авторизация - только email + пароль
 export const login = async (data: LoginData): Promise<LoginResponse> => {
-  const response = await apiClient.post('/api/auth/login', data);
-  return response.data;
+  console.log('API: Отправляем запрос логина:', {
+    url: '/api/auth/login',
+    data: {
+      email: data.email,
+      password_length: data.password.length
+    }
+  });
+  
+  try {
+    const response = await apiClient.post('/api/auth/login', data);
+    console.log('API: Успешный ответ логина:', response.data);
+    return response.data;
+  } catch (error) {
+    console.error('API: Ошибка логина:', error);
+    throw error;
+  }
 };
 
 // Обновление токена

@@ -35,9 +35,9 @@ type ListProductsParams struct {
 
 // FilterValues содержит данные для блока `filters` в ответе API.
 type FilterValues struct {
-	Categories  []FilterCount `json:"categories"`
-	Brands      []FilterCount `json:"brands"`
-	PriceRange  PriceRange    `json:"price_range"`
+	Categories []FilterCount `json:"categories"`
+	Brands     []FilterCount `json:"brands"`
+	PriceRange PriceRange    `json:"price_range"`
 }
 
 type FilterCount struct {
@@ -65,20 +65,8 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 		query = query.Where("LOWER(name) LIKE ? OR LOWER(sku) LIKE ? OR LOWER(brand) LIKE ?", searchQuery, searchQuery, searchQuery)
 	}
 	if params.Category != "" {
-		// Для поддержки вложенных категорий, нужно найти все дочерние ID
-		var categoryIDs []string
-		// Рекурсивная функция для сбора всех ID дочерних категорий
-		var findSubCategoryIDs func(parentID string)
-		findSubCategoryIDs = func(parentID string) {
-			categoryIDs = append(categoryIDs, parentID)
-			var subIDs []string
-			r.db.Model(&model.Category{}).Where("parent_id = ?", parentID).Pluck("id", &subIDs)
-			for _, subID := range subIDs {
-				findSubCategoryIDs(subID)
-			}
-		}
-		findSubCategoryIDs(params.Category)
-		query = query.Where("category_id IN (?)", categoryIDs)
+		// Используем текстовое поле category вместо category_id
+		query = query.Where("category = ?", params.Category)
 	}
 	if params.Brand != "" {
 		query = query.Where("brand = ?", params.Brand)
@@ -104,7 +92,6 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 		return nil, 0, nil, fmt.Errorf("failed to calculate filters: %w", err)
 	}
 
-
 	// --- 3. Считаем общее количество для пагинации ---
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, nil, err
@@ -114,7 +101,7 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 	if params.SortBy != "" {
 		allowedSorts := map[string]string{
 			"name": "name", "price": "price", "stock": "total_stock",
-			"sales": "sales_count_30d",
+			"sales":        "sales_count_30d",
 			"created_date": "created_at",
 		}
 		dbColumn, ok := allowedSorts[params.SortBy]
@@ -138,38 +125,34 @@ func (r *ProductRepository) List(ctx context.Context, params ListProductsParams)
 	return products, total, &filters, nil
 }
 
-
 // calculateFilters вычисляет доступные фильтры на основе текущего запроса.
-// Важный момент: для подсчета фильтров часто нужна логика, отличная от основного запроса.
-// Например, если выбрана категория "Платья", мы все равно хотим показать другие доступные категории.
-// Здесь представлена упрощенная версия для демонстрации.
 func (r *ProductRepository) calculateFilters(baseQuery *gorm.DB, filters *FilterValues, params ListProductsParams) error {
-	// Категории: считаем количество товаров в каждой категории верхнего уровня
-	// Мы клонируем базовый запрос, но сбрасываем фильтр по категории
+	// Категории: считаем количество товаров в каждой категории
 	categoryQuery := baseQuery.Session(&gorm.Session{}) // Создаем новую сессию
 	if params.Search != "" {
 		searchQuery := "%" + strings.ToLower(params.Search) + "%"
 		categoryQuery = categoryQuery.Where("LOWER(name) LIKE ? OR LOWER(sku) LIKE ?", searchQuery, searchQuery)
 	}
-	// ... можно применить и другие фильтры, кроме категории
-	
-	err := categoryQuery.Table("products").
-		Select("categories.id, categories.name, count(products.id) as count").
-		Joins("join categories on categories.id = products.category_id").
-		Group("categories.id, categories.name").
+
+	// Используем текстовое поле category напрямую
+	err := categoryQuery.Select("category as id, category as name, count(*) as count").
+		Group("category").
 		Scan(&filters.Categories).Error
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 
 	// Бренды
 	brandQuery := baseQuery.Session(&gorm.Session{}) // Новая сессия для брендов
 	// Применяем все фильтры, КРОМЕ бренда
 	if params.Category != "" {
-		// ... логика поиска дочерних категорий, как в List ...
-		brandQuery = brandQuery.Where("category_id = ?", params.Category)
+		brandQuery = brandQuery.Where("category = ?", params.Category)
 	}
-	
+
 	rows, err := brandQuery.Select("brand as id, brand as name, count(*) as count").Group("brand").Rows()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer rows.Close()
 	for rows.Next() {
 		var brand FilterCount
@@ -181,7 +164,7 @@ func (r *ProductRepository) calculateFilters(baseQuery *gorm.DB, filters *Filter
 	// Диапазон цен (считаем на основе всех фильтров, кроме цены)
 	priceQuery := baseQuery.Session(&gorm.Session{})
 	if params.Category != "" {
-		priceQuery = priceQuery.Where("category_id = ?", params.Category)
+		priceQuery = priceQuery.Where("category = ?", params.Category)
 	}
 	if params.Brand != "" {
 		priceQuery = priceQuery.Where("brand = ?", params.Brand)
@@ -197,7 +180,6 @@ func (r *ProductRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 		Preload("Images").
 		Preload("Variants").
 		Preload("Supplier").
-		Preload("Category"). // Добавлено для загрузки информации о категории
 		First(&product, "id = ?", id).Error
 	return &product, err
 }
@@ -209,7 +191,7 @@ func (r *ProductRepository) Create(ctx context.Context, product *model.Product) 
 		totalStock += v.Stock
 	}
 	product.TotalStock = totalStock
-	
+
 	return r.db.WithContext(ctx).Create(product).Error
 }
 
@@ -220,7 +202,7 @@ func (r *ProductRepository) Update(ctx context.Context, product *model.Product) 
 		totalStock += v.Stock
 	}
 	product.TotalStock = totalStock
-	
+
 	return r.db.WithContext(ctx).Session(&gorm.Session{FullSaveAssociations: true}).Save(product).Error
 }
 
@@ -231,34 +213,73 @@ func (r *ProductRepository) Delete(ctx context.Context, id uuid.UUID) error {
 
 // CreateImage создает запись об изображении для продукта.
 func (r *ProductRepository) CreateImage(ctx context.Context, image *model.ProductImage) error {
-    return r.db.WithContext(ctx).Create(image).Error
+	return r.db.WithContext(ctx).Create(image).Error
 }
 
-// GetCategories получает все категории с их иерархией из базы данных.
+// GetCategories получает все уникальные категории из продуктов.
 func (r *ProductRepository) GetCategories(ctx context.Context) ([]model.Category, error) {
 	var categories []model.Category
-	// Загружаем только категории верхнего уровня (у которых нет родителя)
-	// и рекурсивно подгружаем их дочерние категории.
-	// Preload("Subcategories.Subcategories") - для 3 уровней вложенности.
-	err := r.db.WithContext(ctx).
-		Where("parent_id IS NULL").
-		Preload("Subcategories.Subcategories").
-		Order("name ASC").
-		Find(&categories).Error
 
-	return categories, err
+	// Получаем уникальные категории из таблицы products
+	var categoryNames []string
+	err := r.db.WithContext(ctx).
+		Model(&model.Product{}).
+		Distinct("category").
+		Where("category IS NOT NULL AND category != ''").
+		Pluck("category", &categoryNames).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Преобразуем в формат Category
+	for _, name := range categoryNames {
+		categories = append(categories, model.Category{
+			ID:   name,
+			Name: name,
+		})
+	}
+
+	return categories, nil
 }
 
 // GetSizeChart получает размерную сетку для указанной категории из базы данных.
+// Поскольку таблицы size_charts нет, возвращаем мокированные данные
 func (r *ProductRepository) GetSizeChart(ctx context.Context, categoryID string) (*model.SizeChart, error) {
-	var sizeChart model.SizeChart
-	// Ищем размерную сетку по ID категории и подгружаем все связанные размеры
-	err := r.db.WithContext(ctx).
-		Preload("Sizes").
-		Where("category_id = ?", categoryID).
-		First(&sizeChart).Error
+	// Мокированные данные для размерной сетки
+	sizeChart := &model.SizeChart{
+		Category: categoryID,
+		Type:     "clothing",
+		Sizes: []model.Size{
+			{
+				Size: "S",
+				Measurements: map[string]string{
+					"chest": "88-92 см",
+					"waist": "70-74 см",
+				},
+				International: "S",
+				US:            "S",
+			},
+			{
+				Size: "M",
+				Measurements: map[string]string{
+					"chest": "96-100 см",
+					"waist": "78-82 см",
+				},
+				International: "M",
+				US:            "M",
+			},
+			{
+				Size: "L",
+				Measurements: map[string]string{
+					"chest": "104-108 см",
+					"waist": "86-90 см",
+				},
+				International: "L",
+				US:            "L",
+			},
+		},
+	}
 
-	// gorm.ErrRecordNotFound - стандартная ошибка, если запись не найдена,
-	// ее удобно обрабатывать в сервисном слое для ответа 404 Not Found.
-	return &sizeChart, err
+	return sizeChart, nil
 }

@@ -1,57 +1,183 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import SalesChart from '../components/SalesChart';
 import TabBar from '../components/TabBar';
+import OrderItem from '../components/OrderItem';
 import { useDashboard } from '../hooks/useDashboard';
+import { useOrders } from '../hooks/useOrders';
 import type { AnalyticsFilters } from '../types/dashboard';
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [selectedDay, setSelectedDay] = useState(4); // Сегодня - четверг (04)
   const [chartMode, setChartMode] = useState<'orders' | 'purchases'>('orders');
-  const [filters] = useState<AnalyticsFilters>({ period: 'today' });
+  const [filters, setFilters] = useState<AnalyticsFilters>({ period: 'today' });
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const { dashboardData, isLoading, error, refetch } = useDashboard(filters);
+  
+  // Получаем последние заказы для отображения
+  const { orders: recentOrders, isLoading: ordersLoading } = useOrders({ 
+    limit: 5, 
+    sort_by: 'date', 
+    sort_order: 'desc' 
+  });
 
   const weekDays = [
-    { short: 'пн', full: 'понедельник', date: '02' },
-    { short: 'вт', full: 'вторник', date: '03' },
-    { short: 'ср', full: 'среда', date: '04' },
-    { short: 'чт', full: 'четверг', date: '05' },
-    { short: 'пт', full: 'пятница', date: '06' },
-    { short: 'сб', full: 'суббота', date: '07' },
-    { short: 'вс', full: 'воскресенье', date: '08' }
+    { short: 'пн', full: 'понедельник', date: '02', fullDate: '2024-12-02' },
+    { short: 'вт', full: 'вторник', date: '03', fullDate: '2024-12-03' },
+    { short: 'ср', full: 'среда', date: '04', fullDate: '2024-12-04' },
+    { short: 'чт', full: 'четверг', date: '05', fullDate: '2024-12-05' },
+    { short: 'пт', full: 'пятница', date: '06', fullDate: '2024-12-06' },
+    { short: 'сб', full: 'суббота', date: '07', fullDate: '2024-12-07' },
+    { short: 'вс', full: 'воскресенье', date: '08', fullDate: '2024-12-08' }
   ];
 
-  const handleDaySelect = (dayIndex: number) => {
+  const handleDaySelect = useCallback((dayIndex: number) => {
     setSelectedDay(dayIndex);
-    // Здесь можно добавить логику для изменения фильтров по дате
-    // const selectedDate = weekDays[dayIndex];
-    // setFilters({ ...filters, date_from: selectedDate.date });
-  };
+    const selectedDate = weekDays[dayIndex];
+    const newFilters: AnalyticsFilters = {
+      period: 'today',
+      date_from: selectedDate.fullDate,
+      date_to: selectedDate.fullDate
+    };
+    setFilters(newFilters);
+    refetch(newFilters);
+  }, [refetch, weekDays]);
 
-  const handleRefresh = () => {
+  const handlePreviousWeek = useCallback(() => {
+    // Логика для перехода к предыдущей неделе
+    const newFilters: AnalyticsFilters = {
+      period: 'week',
+      date_from: '2024-11-25',
+      date_to: '2024-12-01'
+    };
+    setFilters(newFilters);
+    refetch(newFilters);
+  }, [refetch]);
+
+  const handleNextWeek = useCallback(() => {
+    // Логика для перехода к следующей неделе
+    const newFilters: AnalyticsFilters = {
+      period: 'week',
+      date_from: '2024-12-09',
+      date_to: '2024-12-15'
+    };
+    setFilters(newFilters);
+    refetch(newFilters);
+  }, [refetch]);
+
+  const handlePeriodSelect = useCallback((period: string) => {
+    let newFilters: AnalyticsFilters;
+    
+    switch (period) {
+      case 'today':
+        newFilters = { period: 'today' };
+        break;
+      case 'yesterday':
+        newFilters = { period: 'yesterday' };
+        break;
+      case 'week':
+        newFilters = { period: 'week' };
+        break;
+      case 'month':
+        newFilters = { period: 'month' };
+        break;
+      default:
+        newFilters = { period: 'today' };
+    }
+    
+    setFilters(newFilters);
+    refetch(newFilters);
+    setShowDatePicker(false);
+  }, [refetch]);
+
+  const handleRefresh = useCallback(() => {
     refetch(filters);
-  };
+  }, [refetch, filters]);
+
+  const handleRevenueClick = useCallback(() => {
+    navigate('/analytics?tab=revenue');
+  }, [navigate]);
+
+  const handleOrdersClick = useCallback(() => {
+    navigate('/orders');
+  }, [navigate]);
+
+  const handleOrderClick = useCallback((orderId: string) => {
+    navigate(`/orders/${orderId}`);
+  }, [navigate]);
+
+  const handleChartDateFilter = useCallback(() => {
+    setShowDatePicker(!showDatePicker);
+  }, [showDatePicker]);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header with Calendar */}
       <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
-        {/* Navigation arrows and "Сегодня" */}
+        {/* Navigation arrows and Period selector */}
         <div className="flex items-center justify-center mb-4">
-          <button className="p-2">
+          <button 
+            onClick={handlePreviousWeek}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
             <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </button>
           
-          <div className="mx-8 px-6 py-2 bg-gray-100 rounded-lg">
-            <span className="text-lg font-medium text-gray-900">Сегодня</span>
-            <svg className="inline w-4 h-4 ml-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+          <div className="relative mx-8">
+            <button 
+              onClick={() => setShowDatePicker(!showDatePicker)}
+              className="px-6 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              <span className="text-lg font-medium text-gray-900">
+                {filters.period === 'today' ? 'Сегодня' : 
+                 filters.period === 'yesterday' ? 'Вчера' :
+                 filters.period === 'week' ? 'Неделя' :
+                 filters.period === 'month' ? 'Месяц' : 'Сегодня'}
+              </span>
+              <svg className="inline w-4 h-4 ml-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            
+            {/* Dropdown menu */}
+            {showDatePicker && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-gray-200 rounded-lg shadow-lg z-20">
+                <button 
+                  onClick={() => handlePeriodSelect('today')}
+                  className="w-full px-4 py-2 text-left hover:bg-gray-50 first:rounded-t-lg"
+                >
+                  Сегодня
+                </button>
+                <button 
+                  onClick={() => handlePeriodSelect('yesterday')}
+                  className="w-full px-4 py-2 text-left hover:bg-gray-50"
+                >
+                  Вчера
+                </button>
+                <button 
+                  onClick={() => handlePeriodSelect('week')}
+                  className="w-full px-4 py-2 text-left hover:bg-gray-50"
+                >
+                  Неделя
+                </button>
+                <button 
+                  onClick={() => handlePeriodSelect('month')}
+                  className="w-full px-4 py-2 text-left hover:bg-gray-50 last:rounded-b-lg"
+                >
+                  Месяц
+                </button>
+              </div>
+            )}
           </div>
           
-          <button className="p-2">
+          <button 
+            onClick={handleNextWeek}
+            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
             <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
@@ -94,8 +220,11 @@ export default function DashboardPage() {
 
         {/* Main KPIs */}
         <div className="space-y-4">
-          {/* Amount KPI */}
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+          {/* Revenue KPI - Clickable */}
+          <button 
+            onClick={handleRevenueClick}
+            className="w-full bg-white rounded-lg p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow text-left"
+          >
             {isLoading ? (
               <div className="animate-pulse">
                 <div className="h-8 bg-gray-200 rounded w-1/2 mb-2"></div>
@@ -105,25 +234,33 @@ export default function DashboardPage() {
               <>
                 <div className="flex items-baseline space-x-2 mb-2">
                   <span className="text-3xl font-bold text-gray-900">
-                    {dashboardData?.stats.revenue.today.toLocaleString('ru-RU') || 0}
+                    {dashboardData?.revenue?.current?.toLocaleString('ru-RU') || 0}
                   </span>
                   <span className="text-lg text-gray-600">₽</span>
                   <div className="flex items-center space-x-1 ml-4">
-                    <svg className={`w-4 h-4 ${(dashboardData?.stats.revenue.change_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`} fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d={`${(dashboardData?.stats.revenue.change_percent || 0) >= 0 ? 'M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z' : 'M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 112 0v11.586l2.293-2.293a1 1 0 011.414 0z'}`} clipRule="evenodd" />
+                    <svg className={`w-4 h-4 ${(dashboardData?.revenue?.change_percent || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`} fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d={`${(dashboardData?.revenue?.change_percent || 0) >= 0 ? 'M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z' : 'M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 112 0v11.586l2.293-2.293a1 1 0 011.414 0z'}`} clipRule="evenodd" />
                     </svg>
-                    <span className={`text-sm font-medium ${(dashboardData?.stats.revenue.change_percent || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {(dashboardData?.stats.revenue.change_percent || 0) >= 0 ? '+' : ''} {dashboardData?.stats.revenue.change_percent || 0}%
+                    <span className={`text-sm font-medium ${(dashboardData?.revenue?.change_percent || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(dashboardData?.revenue?.change_percent || 0) >= 0 ? '+' : ''}{Math.round(dashboardData?.revenue?.change_percent || 0)}%
                     </span>
                   </div>
                 </div>
-                <p className="text-sm text-gray-500">Заказали на сумму</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-500">Заказали на сумму</p>
+                  <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
               </>
             )}
-          </div>
+          </button>
 
-          {/* Orders KPI */}
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100">
+          {/* Orders KPI - Clickable */}
+          <button 
+            onClick={handleOrdersClick}
+            className="w-full bg-white rounded-lg p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow text-left"
+          >
             {isLoading ? (
               <div className="animate-pulse">
                 <div className="h-8 bg-gray-200 rounded w-1/2 mb-2"></div>
@@ -133,22 +270,27 @@ export default function DashboardPage() {
               <>
                 <div className="flex items-baseline space-x-2 mb-2">
                   <span className="text-3xl font-bold text-gray-900">
-                    {dashboardData?.stats.orders.today || 0}
+                    {dashboardData?.orders?.current || 0}
                   </span>
                   <span className="text-lg text-gray-600">шт.</span>
                   <div className="flex items-center space-x-1 ml-4">
-                    <svg className={`w-4 h-4 ${(dashboardData?.stats.orders.change_count || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`} fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d={`${(dashboardData?.stats.orders.change_count || 0) >= 0 ? 'M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z' : 'M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 112 0v11.586l2.293-2.293a1 1 0 011.414 0z'}`} clipRule="evenodd" />
+                    <svg className={`w-4 h-4 ${(dashboardData?.orders?.change_absolute || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`} fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d={`${(dashboardData?.orders?.change_absolute || 0) >= 0 ? 'M5.293 7.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 5.414V17a1 1 0 11-2 0V5.414L6.707 7.707a1 1 0 01-1.414 0z' : 'M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 112 0v11.586l2.293-2.293a1 1 0 011.414 0z'}`} clipRule="evenodd" />
                     </svg>
-                    <span className={`text-sm font-medium ${(dashboardData?.stats.orders.change_count || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {(dashboardData?.stats.orders.change_count || 0) >= 0 ? '+' : ''} {dashboardData?.stats.orders.change_count || 0}шт.
+                    <span className={`text-sm font-medium ${(dashboardData?.orders?.change_absolute || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(dashboardData?.orders?.change_absolute || 0) >= 0 ? '+' : ''}{Math.round(dashboardData?.orders?.change_absolute || 0)}шт.
                     </span>
                   </div>
                 </div>
-                <p className="text-sm text-gray-500">Кол-во товаров</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-gray-500">Кол-во товаров</p>
+                  <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
               </>
             )}
-          </div>
+          </button>
         </div>
 
         {/* Chart Section */}
@@ -169,7 +311,10 @@ export default function DashboardPage() {
             </div>
             
             <div className="flex items-center space-x-4">
-              <button className="px-4 py-2 bg-gray-100 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors">
+              <button 
+                onClick={handleChartDateFilter}
+                className="px-4 py-2 bg-gray-100 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+              >
                 Дата
                 <svg className="inline w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -190,7 +335,7 @@ export default function DashboardPage() {
             
             <div className="ml-12 h-full">
               <SalesChart
-                data={dashboardData?.sales_chart || []}
+                data={dashboardData?.hourly_sales || []}
                 isLoading={isLoading}
               />
             </div>
@@ -210,37 +355,62 @@ export default function DashboardPage() {
         </div>
 
         {/* Recent Orders */}
-        {dashboardData?.recent_orders && dashboardData.recent_orders.length > 0 && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100">
-            <div className="p-4 border-b border-gray-100">
-              <h2 className="text-lg font-semibold text-gray-900">Последние заказы</h2>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {dashboardData.recent_orders.slice(0, 5).map((order) => (
-                <div key={order.id} className="p-4 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {order.order_number}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {order.customer_name}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-gray-900">
-                        {order.amount.toLocaleString('ru-RU')} ₽
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {order.status}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-100">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900">Последние заказы</h2>
+            <button 
+              onClick={() => navigate('/orders')}
+              className="text-sm text-gray-600 hover:text-gray-900 transition-colors"
+            >
+              Все заказы →
+            </button>
           </div>
-        )}
+          <div className="divide-y divide-gray-100">
+            {ordersLoading ? (
+              <div className="p-4">
+                <div className="animate-pulse space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center space-x-4">
+                      <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
+                      <div className="flex-1 space-y-2">
+                        <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+                        <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : recentOrders.length > 0 ? (
+              <div className="p-4 space-y-3">
+                {recentOrders.slice(0, 5).map((order) => (
+                  <OrderItem
+                    key={order.id}
+                    order={{
+                      id: order.order_number,
+                      date: order.date,
+                      amount: order.totals.total,
+                      status: order.status === 'new' ? 'Новый' :
+                              order.status === 'confirmed' ? 'Подтвержден' :
+                              order.status === 'in_transit' ? 'В пути' :
+                              order.status === 'delivered' ? 'Доставлен' :
+                              order.status === 'returned' ? 'Возвращен' :
+                              order.status === 'cancelled' ? 'Отменен' : order.status,
+                      firstProductImage: order.items[0]?.image
+                    }}
+                    onClick={() => handleOrderClick(order.id)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="p-8 text-center text-gray-500">
+                <svg className="w-12 h-12 text-gray-300 mx-auto mb-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2H6zm1 2a1 1 0 000 2h6a1 1 0 100-2H7zm6 7a1 1 0 011 1v3a1 1 0 11-2 0v-3a1 1 0 011-1zm-3 3a1 1 0 100 2h.01a1 1 0 100-2H10zm-4 1a1 1 0 011-1h.01a1 1 0 110 2H7a1 1 0 01-1-1zm1-4a1 1 0 100 2h.01a1 1 0 100-2H7zm2 0a1 1 0 100 2h.01a1 1 0 100-2H9zm2 0a1 1 0 100 2h.01a1 1 0 100-2H11z" clipRule="evenodd" />
+                </svg>
+                <p className="text-sm">Заказов пока нет</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       <TabBar />

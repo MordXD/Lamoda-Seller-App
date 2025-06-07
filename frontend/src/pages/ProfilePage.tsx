@@ -1,172 +1,139 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import TabBar from '../components/TabBar';
+import { useProfile } from '../hooks/useProfile';
 
 export default function ProfilePage() {
-  const [user] = useState({
-    name: 'Егор Гельман',
-    phone: '+7 909 066 1151',
-    username: '@egor_gelman1',
-    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1000&q=80'
+  const navigate = useNavigate();
+  const { user, balance, linkedAccounts, isLoading, error, updateProfile, changePassword, addBalance, withdrawBalance, switchAccount, logout } = useProfile();
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showBalanceModal, setShowBalanceModal] = useState(false);
+  const [showAccountsModal, setShowAccountsModal] = useState(false);
+  const [balanceAction, setBalanceAction] = useState<'add' | 'withdraw'>('add');
+  const [balanceAmount, setBalanceAmount] = useState('');
+  const [passwordData, setPasswordData] = useState({
+    old_password: '',
+    new_password: '',
+    confirm_password: ''
   });
 
-  const menuItems = [
-    {
-      id: 'emoji-status',
-      icon: (
-        <div className="w-8 h-8 bg-yellow-100 rounded-full flex items-center justify-center">
-          <span className="text-lg">😊</span>
-        </div>
-      ),
-      title: 'Изменить статус эмодзи',
-      hasArrow: false
-    },
-    {
-      id: 'profile-photo',
-      icon: (
-        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-          <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clipRule="evenodd" />
-          </svg>
-        </div>
-      ),
-      title: 'Изменить фото профиля',
-      hasArrow: false
-    }
-  ];
+  // Форматирование баланса из копеек в рубли
+  const formatBalance = (kopecks: number) => {
+    return (kopecks / 100).toLocaleString('ru-RU', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
 
-  const supportItems = [
-    {
-      id: 'support',
-      icon: (
-        <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
-          <svg className="w-5 h-5 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-          </svg>
-        </div>
-      ),
-      title: 'LAMODA SUPPORT',
-      subtitle: '8',
-      hasArrow: true
+  const handleNameEdit = () => {
+    if (user) {
+      setNewName(user.name);
+      setIsEditingName(true);
     }
-  ];
+  };
 
-  const accountItems = [
-    {
-      id: 'add-account',
-      icon: (
-        <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
-          <svg className="w-5 h-5 text-gray-600" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-          </svg>
-        </div>
-      ),
-      title: 'Добавить аккаунт',
-      hasArrow: false
+  const handleNameSave = async () => {
+    if (newName.trim() && newName !== user?.name) {
+      const success = await updateProfile({ name: newName.trim() });
+      if (success) {
+        setIsEditingName(false);
+      }
+    } else {
+      setIsEditingName(false);
     }
-  ];
+  };
 
-  const otherItems = [
-    {
-      id: 'my-profile',
-      icon: (
-        <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
-          <svg className="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-          </svg>
-        </div>
-      ),
-      title: 'Мой профиль',
-      hasArrow: true
-    },
-    {
-      id: 'wallet',
-      icon: (
-        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-          <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
-            <path fillRule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clipRule="evenodd" />
-          </svg>
-        </div>
-      ),
-      title: 'Кошелек',
-      hasArrow: true
-    },
-    {
-      id: 'saved-messages',
-      icon: (
-        <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-          <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z" />
-          </svg>
-        </div>
-      ),
-      title: 'Сохраненные сообщения',
-      hasArrow: true
-    },
-    {
-      id: 'recent-calls',
-      icon: (
-        <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-          <svg className="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-          </svg>
-        </div>
-      ),
-      title: 'Недавние звонки',
-      hasArrow: true
-    },
-    {
-      id: 'devices',
-      icon: (
-        <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
-          <svg className="w-5 h-5 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.771 7H5V5h10v7H8.771z" clipRule="evenodd" />
-          </svg>
-        </div>
-      ),
-      title: 'Устройства',
-      subtitle: '7',
-      hasArrow: true
+  const handlePasswordChange = async () => {
+    if (passwordData.new_password !== passwordData.confirm_password) {
+      alert('Новые пароли не совпадают');
+      return;
     }
-  ];
 
-  const renderMenuItem = (item: any) => (
-    <button
-      key={item.id}
-      className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
-    >
-      <div className="flex items-center space-x-3">
-        {item.icon}
-        <div className="text-left">
-          <div className="text-base font-medium text-gray-900">{item.title}</div>
-          {item.subtitle && (
-            <div className="text-sm text-gray-500">{item.subtitle}</div>
-          )}
+    const success = await changePassword({
+      old_password: passwordData.old_password,
+      new_password: passwordData.new_password
+    });
+
+    if (success) {
+      setShowPasswordModal(false);
+      setPasswordData({ old_password: '', new_password: '', confirm_password: '' });
+      alert('Пароль успешно изменен');
+    }
+  };
+
+  const handleBalanceAction = async () => {
+    const amountKopecks = Math.round(parseFloat(balanceAmount) * 100);
+    
+    if (isNaN(amountKopecks) || amountKopecks <= 0) {
+      alert('Введите корректную сумму');
+      return;
+    }
+
+    let success = false;
+    if (balanceAction === 'add') {
+      success = await addBalance({ amount_kopecks: amountKopecks });
+    } else {
+      success = await withdrawBalance({ amount_kopecks: amountKopecks });
+    }
+
+    if (success) {
+      setShowBalanceModal(false);
+      setBalanceAmount('');
+      alert(`Операция выполнена успешно`);
+    }
+  };
+
+  const handleSwitchAccount = async (targetUserId: string) => {
+    const success = await switchAccount(targetUserId);
+    if (success) {
+      setShowAccountsModal(false);
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
+          <h1 className="text-lg font-semibold text-gray-900 text-center">Профиль</h1>
+        </header>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
         </div>
       </div>
-      {item.hasArrow && (
-        <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-          <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-        </svg>
-      )}
-    </button>
-  );
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50 pb-20">
+        <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
+          <h1 className="text-lg font-semibold text-gray-900 text-center">Профиль</h1>
+        </header>
+        <div className="p-4">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-600 text-sm">{error}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
-        <div className="flex items-center justify-between">
-          <button className="p-2">
-            <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <h1 className="text-lg font-semibold text-gray-900">Профиль</h1>
-          <button className="text-blue-600 font-medium">
-            Изменить
-          </button>
-        </div>
+        <h1 className="text-lg font-semibold text-gray-900 text-center">Профиль</h1>
       </header>
 
       {/* Profile Section */}
@@ -174,42 +141,307 @@ export default function ProfilePage() {
         <div className="px-4 py-8 text-center">
           {/* Avatar */}
           <div className="relative inline-block mb-4">
-            <img
-              src={user.avatar}
-              alt={user.name}
-              className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-lg"
-            />
-            <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-orange-500 rounded-full flex items-center justify-center border-2 border-white">
-              <span className="text-white text-xs font-bold">🔥</span>
+            <div className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-2xl font-bold">
+              {user.name.charAt(0).toUpperCase()}
+            </div>
+            <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center border-2 border-white">
+              <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
             </div>
           </div>
 
           {/* User Info */}
-          <h2 className="text-2xl font-bold text-gray-900 mb-1">{user.name}</h2>
-          <p className="text-gray-600 mb-1">{user.phone}</p>
-          <p className="text-blue-600">{user.username}</p>
+          <div className="mb-4">
+            {isEditingName ? (
+              <div className="flex items-center justify-center space-x-2">
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="text-xl font-bold text-gray-900 bg-transparent border-b-2 border-blue-500 text-center focus:outline-none"
+                  autoFocus
+                />
+                <button
+                  onClick={handleNameSave}
+                  className="text-green-600 hover:text-green-700"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => setIsEditingName(false)}
+                  className="text-red-600 hover:text-red-700"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center space-x-2">
+                <h2 className="text-2xl font-bold text-gray-900">{user.name}</h2>
+                <button
+                  onClick={handleNameEdit}
+                  className="text-blue-600 hover:text-blue-700"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                  </svg>
+                </button>
+              </div>
+            )}
+            <p className="text-gray-600 mt-1">{user.email}</p>
+            <p className="text-sm text-gray-500 mt-1">
+              Зарегистрирован: {new Date(user.created_at).toLocaleDateString('ru-RU')}
+            </p>
+          </div>
+
+          {/* Balance Card */}
+          <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg p-4 text-white mx-4 mb-4">
+            <div className="text-sm opacity-90 mb-1">Баланс</div>
+            <div className="text-2xl font-bold">{formatBalance(balance)} ₽</div>
+            <div className="flex space-x-2 mt-3">
+              <button
+                onClick={() => {
+                  setBalanceAction('add');
+                  setShowBalanceModal(true);
+                }}
+                className="flex-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg py-2 px-3 text-sm font-medium transition-colors"
+              >
+                Пополнить
+              </button>
+              <button
+                onClick={() => {
+                  setBalanceAction('withdraw');
+                  setShowBalanceModal(true);
+                }}
+                className="flex-1 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg py-2 px-3 text-sm font-medium transition-colors"
+              >
+                Вывести
+              </button>
+            </div>
+          </div>
         </div>
+      </div>
 
-        {/* Profile Actions */}
-        <div className="border-t border-gray-100">
-          {menuItems.map(renderMenuItem)}
+      {/* Settings Section */}
+      <div className="bg-white mt-4">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <h3 className="text-lg font-semibold text-gray-900">Настройки</h3>
         </div>
+        
+        <button
+          onClick={() => setShowPasswordModal(true)}
+          className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+        >
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+              <svg className="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="text-left">
+              <div className="text-base font-medium text-gray-900">Изменить пароль</div>
+              <div className="text-sm text-gray-500">Обновите пароль для безопасности</div>
+            </div>
+          </div>
+          <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+          </svg>
+        </button>
+
+        {/* Переключение аккаунтов */}
+        {linkedAccounts.length > 0 && (
+          <button
+            onClick={() => setShowAccountsModal(true)}
+            className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="text-left">
+                <div className="text-base font-medium text-gray-900">Переключить аккаунт</div>
+                <div className="text-sm text-gray-500">Доступно аккаунтов: {linkedAccounts.length}</div>
+              </div>
+            </div>
+            <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+            </svg>
+          </button>
+        )}
+
+        <button className="w-full flex items-center justify-between p-4 hover:bg-gray-50 transition-colors">
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+              <svg className="w-5 h-5 text-orange-600" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="text-left">
+              <div className="text-base font-medium text-gray-900">Поддержка</div>
+              <div className="text-sm text-gray-500">Связаться с службой поддержки</div>
+            </div>
+          </div>
+          <svg className="w-5 h-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+          </svg>
+        </button>
+
+        {/* Кнопка выхода */}
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center justify-between p-4 hover:bg-red-50 transition-colors border-t border-gray-100"
+        >
+          <div className="flex items-center space-x-3">
+            <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+              <svg className="w-5 h-5 text-red-600" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 102 0V4a1 1 0 00-1-1zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="text-left">
+              <div className="text-base font-medium text-red-600">Выйти из аккаунта</div>
+              <div className="text-sm text-red-500">Завершить текущую сессию</div>
+            </div>
+          </div>
+        </button>
       </div>
 
-      {/* Support Section */}
-      <div className="bg-white mt-4">
-        {supportItems.map(renderMenuItem)}
-      </div>
+      {/* Password Change Modal */}
+      {showPasswordModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-md">
+            <div className="p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Изменить пароль</h3>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Текущий пароль
+                </label>
+                <input
+                  type="password"
+                  value={passwordData.old_password}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, old_password: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Новый пароль
+                </label>
+                <input
+                  type="password"
+                  value={passwordData.new_password}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, new_password: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Подтвердите новый пароль
+                </label>
+                <input
+                  type="password"
+                  value={passwordData.confirm_password}
+                  onChange={(e) => setPasswordData(prev => ({ ...prev, confirm_password: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-200 flex space-x-3">
+              <button
+                onClick={() => setShowPasswordModal(false)}
+                className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handlePasswordChange}
+                className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
+              >
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Add Account Section */}
-      <div className="bg-white mt-4">
-        {accountItems.map(renderMenuItem)}
-      </div>
+      {/* Balance Modal */}
+      {showBalanceModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-md">
+            <div className="p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {balanceAction === 'add' ? 'Пополнить баланс' : 'Вывести средства'}
+              </h3>
+            </div>
+            <div className="p-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Сумма (₽)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={balanceAmount}
+                onChange={(e) => setBalanceAmount(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="0.00"
+              />
+            </div>
+            <div className="p-4 border-t border-gray-200 flex space-x-3">
+              <button
+                onClick={() => setShowBalanceModal(false)}
+                className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleBalanceAction}
+                className="flex-1 px-4 py-2 text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors"
+              >
+                {balanceAction === 'add' ? 'Пополнить' : 'Вывести'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* Other Options */}
-      <div className="bg-white mt-4">
-        {otherItems.map(renderMenuItem)}
-      </div>
+      {/* Account Switch Modal */}
+      {showAccountsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg w-full max-w-md">
+            <div className="p-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Переключить аккаунт</h3>
+            </div>
+            <div className="p-4 space-y-2">
+              {linkedAccounts.map((account) => (
+                <button
+                  key={account.id}
+                  onClick={() => handleSwitchAccount(account.id)}
+                  className="w-full p-3 text-left border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <div className="font-medium text-gray-900">{account.name}</div>
+                  <div className="text-sm text-gray-500">{account.email}</div>
+                </button>
+              ))}
+            </div>
+            <div className="p-4 border-t border-gray-200">
+              <button
+                onClick={() => setShowAccountsModal(false)}
+                className="w-full px-4 py-2 text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors"
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <TabBar />
     </div>

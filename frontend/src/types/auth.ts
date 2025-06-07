@@ -34,6 +34,7 @@ export interface AuthContextType {
   isInitialized: boolean;
   login: (usernameOrEmail: string, password: string) => Promise<void>;
   logout: () => void;
+  logoutAll: () => void;
   switchAccount: (accountId: string) => void;
   addAccount: (account: Account) => void;
 } 

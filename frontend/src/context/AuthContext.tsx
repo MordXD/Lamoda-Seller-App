@@ -67,13 +67,21 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const login = async (usernameOrEmail: string, password: string): Promise<void> => {
     setIsLoading(true);
     try {
-      console.log('Отправляем запрос на авторизацию:', { username_or_email: usernameOrEmail });
+      console.log('Отправляем запрос на авторизацию:', { 
+        email: usernameOrEmail,
+        password_length: password.length,
+        password_first_char: password.charAt(0),
+        password_last_char: password.charAt(password.length - 1)
+      });
       
-      const response = await apiLogin({ username_or_email: usernameOrEmail, password });
+      const loginData = { email: usernameOrEmail, password };
+      console.log('Данные для отправки:', loginData);
+      
+      const response = await apiLogin(loginData);
       
       console.log('Ответ сервера:', response);
       
-      const { token, user } = response;
+      const { token } = response;
       
       if (!token) {
         console.error('Токен отсутствует в ответе сервера:', response);
@@ -81,19 +89,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
       
       console.log('Получен токен:', token);
-      console.log('Данные пользователя:', user);
       
-      // Создаем новый аккаунт с данными от сервера
+      // Создаем новый аккаунт с минимальными данными (бэкенд возвращает только токен)
       const newAccount: Account = {
-        id: user?.id || uuidv4(),
-        shopName: user?.shop_name || user?.name || usernameOrEmail,
+        id: uuidv4(), // Генерируем временный ID
+        shopName: usernameOrEmail, // Используем email как имя магазина
         token: token,
-        user: user ? {
-          id: user.id,
-          email: user.email,
-          shopName: user.shop_name || user.name,
-        } : {
-          id: uuidv4(),
+        user: {
+          id: uuidv4(), // Генерируем временный ID пользователя
           email: usernameOrEmail,
           shopName: usernameOrEmail,
         },
@@ -101,9 +104,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       
       console.log('Создан новый аккаунт:', newAccount);
       
-      // Проверяем, есть ли уже такой аккаунт (по email или ID)
+      // Проверяем, есть ли уже такой аккаунт (по email)
       const existingAccountIndex = accounts.findIndex(
-        acc => acc.user?.email === user?.email || acc.user?.id === user?.id
+        acc => acc.user?.email === usernameOrEmail
       );
       
       let updatedAccounts: Account[];
@@ -137,6 +140,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         const axiosError = error as any;
         console.error('Детали ошибки:', axiosError.response?.data);
         console.error('Статус ошибки:', axiosError.response?.status);
+        console.error('Заголовки ответа:', axiosError.response?.headers);
+        console.error('Конфигурация запроса:', axiosError.config);
       }
       throw error;
     } finally {
@@ -148,6 +153,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     // Удаляем активный аккаунт и токен
     localStorage.removeItem('active_account_id');
     localStorage.removeItem('active_token');
+    setActiveAccount(null);
+  };
+
+  const logoutAll = () => {
+    // Удаляем все данные аккаунтов
+    localStorage.removeItem('accounts');
+    localStorage.removeItem('active_account_id');
+    localStorage.removeItem('active_token');
+    setAccounts([]);
     setActiveAccount(null);
   };
 
@@ -174,6 +188,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     isInitialized,
     login,
     logout,
+    logoutAll,
     switchAccount,
     addAccount,
   };

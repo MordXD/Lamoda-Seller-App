@@ -5,7 +5,7 @@
 DO $$
 DECLARE
     -- Пользователи (Продавцы)
-    user1_id UUID := 'a19a79a5-5a45-420a-994b-118a14b35d61';
+    user1_id UUID := 'd38fa38e-9759-4508-9b17-d80594bfae7e';
     user2_id UUID := 'b29a79a5-5a45-420a-994b-118a14b35d62';
 
     -- Поставщики
@@ -51,14 +51,16 @@ BEGIN
 
 -- === 1. ПОЛЬЗОВАТЕЛИ ===
 INSERT INTO users (id, name, email, hashed_password, balance_kopecks) VALUES
-(user1_id, 'Иван Петров', 'ivan.petrov@example.com', '$2a$10$...', 10000000),
-(user2_id, 'Мария Сидорова', 'maria.sidorova@example.com', '$2a$10$...', 5000000);
+(user1_id, 'milka', 'iqv@gmail.com', '$2a$10$g20QB8Y2OEhSC15Yaj3OQuYqaGFgbfumn5bHq2LwIq0C.KYfyjRga', 10000000),
+(user2_id, 'Мария Сидорова', 'maria.sidorova@example.com', '$2a$10$...', 5000000)
+ON CONFLICT (id) DO NOTHING;
 
 -- === 2. ПОСТАВЩИКИ ===
 INSERT INTO suppliers (id, name, contact) VALUES
 (supplier_zara_id, 'ZARA Distribution', 'supply@zara.com'),
 (supplier_hm_id, 'H&M Logistics', 'logistics@hm.com'),
-(supplier_nike_id, 'Nike Europe', 'contact@nike.com');
+(supplier_nike_id, 'Nike Europe', 'contact@nike.com')
+ON CONFLICT (id) DO NOTHING;
 
 -- === 3. ПРОДУКТЫ ===
 INSERT INTO products (id, name, brand, category, sku, price, cost_price, rating, reviews_count, supplier_id) VALUES
@@ -67,7 +69,8 @@ INSERT INTO products (id, name, brand, category, sku, price, cost_price, rating,
 (product3_id, 'Джинсы широкие с высокой посадкой', 'ZARA', 'jeans', 'JN001-MAIN', 8900, 4000, 4.8, 25, supplier_zara_id),
 (product4_id, 'Кроссовки беговые Air Zoom', 'Nike', 'shoes', 'NK001-MAIN', 14990, 7500, 4.9, 52, supplier_nike_id),
 (product5_id, 'Футболка спортивная Dri-FIT', 'Nike', 't-shirts', 'NK002-MAIN', 4500, 2000, 4.6, 31, supplier_nike_id),
-(product6_id, 'Леггинсы для фитнеса', 'Nike', 'leggings', 'NK003-MAIN', 7200, 3100, 4.7, 19, supplier_nike_id);
+(product6_id, 'Леггинсы для фитнеса', 'Nike', 'leggings', 'NK003-MAIN', 7200, 3100, 4.7, 19, supplier_nike_id)
+ON CONFLICT (id) DO NOTHING;
 
 -- === 4. ВАРИАНТЫ ПРОДУКТОВ ===
 INSERT INTO product_variants (id, product_id, sku, size, color, stock) VALUES
@@ -78,7 +81,9 @@ INSERT INTO product_variants (id, product_id, sku, size, color, stock) VALUES
 (variant4_42_id, product4_id, 'NK001-42', '42', 'Черный', 30),
 (variant4_43_id, product4_id, 'NK001-43', '43', 'Черный', 12),
 (variant5_l_id, product5_id, 'NK002-L', 'L', 'Белый', 50),
-(variant6_m_id, product6_id, 'NK003-M', 'M', 'Черный', 40);
+(variant6_m_id, product6_id, 'NK003-M', 'M', 'Черный', 40)
+ON CONFLICT (id) DO NOTHING;
+
 
 -- === 5. ИЗОБРАЖЕНИЯ ПРОДУКТОВ ===
 INSERT INTO product_images (product_id, url, is_main) VALUES
@@ -87,18 +92,21 @@ INSERT INTO product_images (product_id, url, is_main) VALUES
 (product3_id, 'https://example.com/images/jeans.jpg', TRUE),
 (product4_id, 'https://example.com/images/sneakers.jpg', TRUE),
 (product5_id, 'https://example.com/images/tshirt.jpg', TRUE),
-(product6_id, 'https://example.com/images/leggings.jpg', TRUE);
+(product6_id, 'https://example.com/images/leggings.jpg', TRUE)
+ON CONFLICT (id) DO NOTHING;
 
 -- === 6. ЗАКАЗЫ ===
 -- Заказы для Пользователя 1 (Иван Петров)
 INSERT INTO orders (id, user_id, order_number, date, status) VALUES
 (order1_user1_id, user1_id, 'ORD-001', NOW() - INTERVAL '5 days', 'completed'), -- Недавний
 (order2_user1_id, user1_id, 'ORD-002', NOW() - INTERVAL '25 days', 'completed'), -- Внутри 30 дней
-(order3_user1_id, user1_id, 'ORD-003', NOW() - INTERVAL '80 days', 'completed'); -- Внутри 90 дней
+(order3_user1_id, user1_id, 'ORD-003', NOW() - INTERVAL '80 days', 'completed') -- Внутри 90 дней
+ON CONFLICT (id) DO NOTHING;
 -- Заказы для Пользователя 2 (Мария Сидорова)
 INSERT INTO orders (id, user_id, order_number, date, status) VALUES
 (order4_user2_id, user2_id, 'ORD-004', NOW() - INTERVAL '2 days', 'completed'),
-(order5_user2_id, user2_id, 'ORD-005', NOW() - INTERVAL '1 year', 'completed'); -- Старый заказ для проверки '1y'
+(order5_user2_id, user2_id, 'ORD-005', NOW() - INTERVAL '1 year', 'completed') -- Старый заказ для проверки '1y'
+ON CONFLICT (id) DO NOTHING;
 
 -- === 7. ПОЗИЦИИ В ЗАКАЗАХ ===
 INSERT INTO order_items (id, order_id, product_id, variant_id, name, brand, sku, size, quantity, price, cost_price, total) VALUES
@@ -114,7 +122,8 @@ INSERT INTO order_items (id, order_id, product_id, variant_id, name, brand, sku,
 (order_item5_id, order4_user2_id, product5_id, variant5_l_id, 'Футболка спортивная Dri-FIT', 'Nike', 'NK002-L', 'L', 2, 4500, 2000, 9000),
 -- Заказ 5 (Мария)
 (order_item6_id, order5_user2_id, product4_id, variant4_43_id, 'Кроссовки беговые Air Zoom', 'Nike', 'NK001-43', '43', 1, 14500, 7200, 14500),
-(order_item7_id, order5_user2_id, product6_id, variant6_m_id, 'Леггинсы для фитнеса', 'Nike', 'NK003-M', 'M', 1, 7200, 3100, 7200);
+(order_item7_id, order5_user2_id, product6_id, variant6_m_id, 'Леггинсы для фитнеса', 'Nike', 'NK003-M', 'M', 1, 7200, 3100, 7200)
+ON CONFLICT (id) DO NOTHING;
 
 -- === 8. ВОЗВРАТЫ ===
 INSERT INTO order_returns (order_item_id, reason_code, quantity, returned_at, status) VALUES
@@ -127,6 +136,7 @@ INSERT INTO order_returns (order_item_id, reason_code, quantity, returned_at, st
 -- Возврат по футболкам (цвет не тот), 1 день назад
 (order_item5_id, 'color_difference', 1, NOW() - INTERVAL '1 day', 'processing'),
 -- Возврат по старым кроссовкам (износ, но причина - качество), 11 месяцев назад
-(order_item6_id, 'quality_issues', 1, NOW() - INTERVAL '11 months', 'completed');
+(order_item6_id, 'quality_issues', 1, NOW() - INTERVAL '11 months', 'completed')
+ON CONFLICT (id) DO NOTHING;
 
 END $$;

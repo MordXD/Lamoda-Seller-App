@@ -1,3 +1,47 @@
+export interface Metric {
+  current: number;
+  previous: number;
+  change_percent: number;
+  change_absolute: number;
+  trend: string; // up, down, stable
+}
+
+export interface TopCategory {
+  category: string;
+  name: string;
+  revenue: number;
+  orders: number;
+  items: number;
+}
+
+export interface HourlySale {
+  hour: number;
+  revenue: number;
+  orders: number;
+}
+
+export interface PeriodInfo {
+  type: string;
+  date_from: string;
+  date_to: string;
+  previous_period?: {
+    date_from: string;
+    date_to: string;
+  };
+}
+
+export interface DashboardResponse {
+  period: PeriodInfo;
+  revenue: Metric;
+  orders: Metric;
+  items_sold: Metric;
+  avg_order_value: Metric;
+  conversion_rate: Metric;
+  return_rate: Metric;
+  top_categories: TopCategory[];
+  hourly_sales: HourlySale[];
+}
+
 export interface DashboardStats {
   revenue: {
     today: number;
@@ -50,21 +94,6 @@ export interface CategoryPerformance {
   revenue: number;
   avg_price: number;
   growth_percent: number;
-}
-
-export interface DashboardResponse {
-  stats: DashboardStats;
-  sales_chart: SalesData[];
-  top_products: TopProduct[];
-  category_performance: CategoryPerformance[];
-  recent_orders: Array<{
-    id: string;
-    order_number: string;
-    customer_name: string;
-    amount: number;
-    status: string;
-    date: string;
-  }>;
 }
 
 export interface AnalyticsFilters {

@@ -1,11 +1,7 @@
-interface SalesData {
-  date: string;
-  orders: number;
-  purchases: number;
-}
+import type { HourlySale } from '../types/dashboard';
 
 interface SalesChartProps {
-  data: SalesData[];
+  data: HourlySale[];
   isLoading?: boolean;
 }
 
@@ -26,9 +22,9 @@ export default function SalesChart({ data, isLoading = false }: SalesChartProps)
     );
   }
 
-  const maxValue = Math.max(...data.map(d => Math.max(d.orders, d.purchases)));
+  const maxValue = Math.max(...data.map(d => Math.max(d.orders, d.revenue)));
   const minValue = 0;
-  const range = maxValue - minValue;
+  const range = maxValue - minValue || 1; // Избегаем деления на ноль
   
   return (
     <div className="h-full relative">
@@ -46,41 +42,41 @@ export default function SalesChart({ data, isLoading = false }: SalesChartProps)
           />
         ))}
         
-        {/* Orders line (black) */}
+        {/* Revenue line (black) */}
         <polyline
           fill="none"
           stroke="#000000"
           strokeWidth="2"
           points={data
             .map((item, index) => {
-              const x = (index / (data.length - 1)) * 400;
-              const y = 240 - ((item.orders - minValue) / range) * 200;
+              const x = (index / Math.max(data.length - 1, 1)) * 400;
+              const y = 240 - ((item.revenue - minValue) / range) * 200;
               return `${x},${y}`;
             })
             .join(' ')}
         />
         
-        {/* Purchases line (red) */}
+        {/* Orders line (red) */}
         <polyline
           fill="none"
           stroke="#ef4444"
           strokeWidth="2"
           points={data
             .map((item, index) => {
-              const x = (index / (data.length - 1)) * 400;
-              const y = 240 - ((item.purchases - minValue) / range) * 200;
+              const x = (index / Math.max(data.length - 1, 1)) * 400;
+              const y = 240 - ((item.orders - minValue) / range) * 200;
               return `${x},${y}`;
             })
             .join(' ')}
         />
         
-        {/* Orders data points */}
+        {/* Revenue data points */}
         {data.map((item, index) => {
-          const x = (index / (data.length - 1)) * 400;
-          const y = 240 - ((item.orders - minValue) / range) * 200;
+          const x = (index / Math.max(data.length - 1, 1)) * 400;
+          const y = 240 - ((item.revenue - minValue) / range) * 200;
           return (
             <circle
-              key={`orders-${index}`}
+              key={`revenue-${index}`}
               cx={x}
               cy={y}
               r="3"
@@ -89,13 +85,13 @@ export default function SalesChart({ data, isLoading = false }: SalesChartProps)
           );
         })}
         
-        {/* Purchases data points */}
+        {/* Orders data points */}
         {data.map((item, index) => {
-          const x = (index / (data.length - 1)) * 400;
-          const y = 240 - ((item.purchases - minValue) / range) * 200;
+          const x = (index / Math.max(data.length - 1, 1)) * 400;
+          const y = 240 - ((item.orders - minValue) / range) * 200;
           return (
             <circle
-              key={`purchases-${index}`}
+              key={`orders-${index}`}
               cx={x}
               cy={y}
               r="3"
@@ -109,7 +105,7 @@ export default function SalesChart({ data, isLoading = false }: SalesChartProps)
       <div className="absolute bottom-0 left-0 right-0 flex justify-between text-xs text-gray-500 pt-2">
         {data.map((item, index) => (
           <span key={index} className="text-center">
-            {item.date}
+            {item.hour}:00
           </span>
         ))}
       </div>
