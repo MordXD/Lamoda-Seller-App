@@ -1,16 +1,5 @@
 package model
 
-import (
-	"time"
-)
-
-type Order struct {
-	ID        int       `gorm:"primaryKey;autoIncrement"`
-	Amount    float64   `gorm:"not null"`
-	Status    string    `gorm:"type:varchar(20);not null"` // "ordered" или "delivered"
-	CreatedAt time.Time `gorm:"autoCreateTime"`
-}
-
 type KPI struct {
 	TotalAmount       float64 `json:"total_amount"`
 	AmountDiffPercent float64 `json:"amount_diff_percent"`
@@ -19,7 +8,7 @@ type KPI struct {
 }
 
 type SalesChartPoint struct {
-	Date   string  `json:"date"`   // Формат: "2006-01-02" (ISO 8601)
+	Date   string  `json:"date"` // Формат: "2006-01-02" (ISO 8601)
 	Amount float64 `json:"amount"`
 }
 
@@ -30,6 +19,6 @@ type DashboardSalesChart struct {
 }
 
 type DashboardResponse struct {
-	KPI        KPI                `json:"kpi"`
+	KPI        KPI                 `json:"kpi"`
 	SalesChart DashboardSalesChart `json:"sales_chart"`
 }
