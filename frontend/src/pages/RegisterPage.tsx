@@ -58,7 +58,7 @@ export default function RegisterPage() {
         throw new Error(data.message || 'Ошибка регистрации');
       }
 
-      setGeneratedPassword(data.password);
+      setGeneratedPassword(data.temporary_password);
     } catch (error: any) {
       console.error('Registration failed:', error);
       setError(error.message || 'Что-то пошло не так');
