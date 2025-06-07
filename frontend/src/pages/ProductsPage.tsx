@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import ProductItem from '../components/ProductItem';
 import TabBar from '../components/TabBar';
-import AccountSwitcher from '../components/AccountSwitcher';
-import { useAuth } from '../context/AuthContext';
 
 interface Product {
   id: string;
@@ -13,7 +11,6 @@ interface Product {
 }
 
 export default function ProductsPage() {
-  const { activeAccount } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);

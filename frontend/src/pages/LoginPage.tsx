@@ -28,38 +28,31 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 font-montserrat-regular">
       <div className="max-w-md w-full bg-white rounded-2xl shadow-sm p-8">
         {/* Логотип */}
-        <div className="text-center mb-12">
+        <div className="text-center">
           <div className="flex items-center justify-center mb-2">
-            <img 
-              src="/src/assets/icons/lamoda-icon.svg" 
-              alt="Lamoda" 
-              className="h-8 w-8 mr-2"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.style.display = 'none';
-              }}
+            <img
+              className="h-[40px] w-[220px]"
+              src="/icons/lamoda-icon.svg"
+              alt="Войти"
             />
-            <h1 className="text-3xl font-normal text-black">
-              <span className="font-bold">lamoda</span> seller
-            </h1>
           </div>
         </div>
 
         {/* Форма входа */}
-        <form onSubmit={handleSubmit} className="space-y-8">
+        <form onSubmit={handleSubmit} className="space-y-4">
           {/* Поле логина */}
           <div className="relative">
-            <label className="block text-xs text-gray-500 mb-2 uppercase tracking-wide">
+            <label className="block text-xs text-gray-500 mb-2 uppercase tracking-wide font-montserrat-regular">
               телефон / email
             </label>
             <input
               type="text"
               value={login}
               onChange={(e) => setLogin(e.target.value)}
-              className="w-full px-0 py-3 text-lg bg-transparent border-0 border-b-2 border-gray-200 focus:border-gray-400 focus:outline-none focus:ring-0 placeholder-gray-400"
+              className="w-full px-0 py-3 text-lg bg-transparent border-0 border-b-2 border-gray-200 focus:border-gray-400 focus:outline-none focus:ring-0 placeholder-gray-400 font-montserrat-regular"
               placeholder="Логин"
               disabled={isLoading}
               required
@@ -68,14 +61,14 @@ export default function LoginPage() {
 
           {/* Поле пароля */}
           <div className="relative">
-            <label className="block text-xs text-gray-500 mb-2 uppercase tracking-wide">
-              8 символов
+            <label className="block text-xs text-gray-500 mb-2 uppercase tracking-wide font-montserrat-regular">
+              Пароль
             </label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-0 py-3 text-lg bg-transparent border-0 border-b-2 border-gray-200 focus:border-gray-400 focus:outline-none focus:ring-0 placeholder-gray-400"
+              className="w-full px-0 py-3 text-lg bg-transparent border-0 border-b-2 border-gray-200 focus:border-gray-400 focus:outline-none focus:ring-0 placeholder-gray-400 font-montserrat-regular"
               placeholder="Пароль"
               disabled={isLoading}
               required
@@ -85,7 +78,7 @@ export default function LoginPage() {
 
           {/* Сообщение об ошибке */}
           {error && (
-            <div className="text-red-600 text-sm text-center">{error}</div>
+            <div className="text-red-600 text-sm text-center font-montserrat-regular">{error}</div>
           )}
 
           {/* Кнопка входа */}
@@ -93,7 +86,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-black text-white py-4 px-6 text-lg font-medium rounded-lg hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full bg-black text-white py-4 px-6 text-lg font-montserrat-semibold rounded-lg hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? 'Входим...' : 'Войти'}
             </button>
@@ -103,7 +96,7 @@ export default function LoginPage() {
           <div className="flex justify-between items-center pt-6">
             <button
               type="button"
-              className="text-gray-600 hover:text-gray-800 text-base transition-colors"
+              className="text-gray-600 hover:text-gray-800 text-base transition-colors font-montserrat-regular"
               onClick={() => {
                 // Логика восстановления пароля
                 console.log('Forgot password clicked');
@@ -113,7 +106,7 @@ export default function LoginPage() {
             </button>
             <button
               type="button"
-              className="text-gray-600 hover:text-gray-800 text-base underline transition-colors"
+              className="text-gray-600 hover:text-gray-800 text-base underline transition-colors font-montserrat-regular"
               onClick={() => {
                 // Переход на регистрацию
                 navigate('/register');
@@ -128,7 +121,7 @@ export default function LoginPage() {
         <div className="text-center mt-12">
           <button
             type="button"
-            className="text-gray-500 hover:text-gray-700 text-sm transition-colors"
+            className="text-gray-500 hover:text-gray-700 text-sm transition-colors font-montserrat-regular"
             onClick={() => {
               // Переход на политику конфиденциальности
               window.open('/privacy-policy', '_blank');
