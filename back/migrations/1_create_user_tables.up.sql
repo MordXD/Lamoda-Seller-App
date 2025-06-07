@@ -1,7 +1,6 @@
 -- +migrate Up
 
 -- Включаем расширение для генерации UUID, если оно еще не включено.
--- Модели используют uuid_generate_v4() по умолчанию.
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Создаем функцию для автоматического обновления поля updated_at
@@ -24,7 +23,7 @@ CREATE TABLE users (
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
     hashed_password TEXT NOT NULL,
-    balance_kopecks BIGINT NOT NULL DEFAULT 0, -- Соответствует int64 BalanceKopecks
+    balance_kopecks BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -68,12 +67,14 @@ CREATE TABLE products (
     subcategory VARCHAR(100),
     sku VARCHAR(100) UNIQUE,
     barcode VARCHAR(100),
-    price NUMERIC(12, 2) NOT NULL, -- Используем NUMERIC для денежных значений
+    price NUMERIC(12, 2) NOT NULL,
     cost_price NUMERIC(12, 2),
     currency VARCHAR(10) DEFAULT 'RUB',
     total_stock INTEGER NOT NULL DEFAULT 0,
     rating NUMERIC(3, 2) DEFAULT 0,
     reviews_count INTEGER NOT NULL DEFAULT 0,
+    -- Поле return_rate в продукте теперь можно считать устаревшим или использовать как кеш.
+    -- Реальные данные будут считаться из таблицы order_returns.
     return_rate NUMERIC(5, 2) DEFAULT 0,
     status VARCHAR(50) NOT NULL DEFAULT 'draft',
     seasonal_demand VARCHAR(100),
@@ -90,18 +91,9 @@ CREATE TABLE products (
     CONSTRAINT fk_supplier FOREIGN KEY(supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
 );
 
--- Индексы для продуктов
-CREATE INDEX idx_products_name ON products(name);
-CREATE INDEX idx_products_brand ON products(brand);
 CREATE INDEX idx_products_category ON products(category);
-CREATE INDEX idx_products_subcategory ON products(subcategory);
 CREATE INDEX idx_products_status ON products(status);
-CREATE INDEX idx_products_barcode ON products(barcode);
-
-CREATE TRIGGER update_products_updated_at
-BEFORE UPDATE ON products
-FOR EACH ROW
-EXECUTE PROCEDURE update_updated_at_column();
+CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON products FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 
 
 -- Таблица вариантов продукта (product_variants)
@@ -115,14 +107,12 @@ CREATE TABLE product_variants (
     stock INTEGER NOT NULL DEFAULT 0,
     reserved INTEGER NOT NULL DEFAULT 0,
     price NUMERIC(12, 2),
-    weight NUMERIC(10, 2), -- вес в граммах
+    weight NUMERIC(10, 2),
     dimensions JSONB,
     CONSTRAINT fk_product FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_product_variants_product_id ON product_variants(product_id);
-CREATE INDEX idx_product_variants_size ON product_variants(size);
-CREATE INDEX idx_product_variants_color ON product_variants(color);
 
 
 -- Таблица изображений продукта (product_images)
@@ -132,12 +122,11 @@ CREATE TABLE product_images (
     url VARCHAR(2048) NOT NULL,
     alt_text VARCHAR(255),
     is_main BOOLEAN NOT NULL DEFAULT FALSE,
-    "order" INTEGER NOT NULL DEFAULT 0, -- "order" в кавычках, т.к. это ключевое слово SQL
+    "order" INTEGER NOT NULL DEFAULT 0,
     CONSTRAINT fk_product FOREIGN KEY(product_id) REFERENCES products(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_product_images_product_id ON product_images(product_id);
-CREATE INDEX idx_product_images_is_main ON product_images(is_main);
 
 
 -- =================================================================
@@ -147,8 +136,8 @@ CREATE INDEX idx_product_images_is_main ON product_images(is_main);
 -- Таблица заказов (orders)
 CREATE TABLE orders (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID, -- ID продавца
-    customer_id UUID, -- ID покупателя (может быть NULL, если не зарегистрирован)
+    user_id UUID,
+    customer_id UUID,
     order_number VARCHAR(100) UNIQUE NOT NULL,
     date TIMESTAMPTZ NOT NULL,
     status VARCHAR(50) NOT NULL,
@@ -163,14 +152,9 @@ CREATE TABLE orders (
 );
 
 CREATE INDEX idx_orders_user_id ON orders(user_id);
-CREATE INDEX idx_orders_customer_id ON orders(customer_id);
 CREATE INDEX idx_orders_date ON orders(date);
 CREATE INDEX idx_orders_status ON orders(status);
-
-CREATE TRIGGER update_orders_updated_at
-BEFORE UPDATE ON orders
-FOR EACH ROW
-EXECUTE PROCEDURE update_updated_at_column();
+CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON orders FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
 
 
 -- Таблица позиций в заказе (order_items)
@@ -191,9 +175,6 @@ CREATE TABLE order_items (
     discount NUMERIC(12, 2),
     total NUMERIC(12, 2) NOT NULL,
     CONSTRAINT fk_order FOREIGN KEY(order_id) REFERENCES orders(id) ON DELETE CASCADE
-    -- Примечание: Мы не ставим жесткие FK на product_id/variant_id, т.к.
-    -- товары могут быть удалены, а история в заказе должна остаться.
-    -- Целостность обеспечивается на уровне бизнес-логики.
 );
 
 CREATE INDEX idx_order_items_order_id ON order_items(order_id);
@@ -211,3 +192,51 @@ CREATE TABLE status_histories (
 );
 
 CREATE INDEX idx_status_histories_order_id ON status_histories(order_id);
+
+
+-- =================================================================
+-- Таблицы, связанные с возвратами (для аналитики)
+-- =================================================================
+
+-- Справочник причин возврата
+CREATE TABLE return_reasons (
+    code VARCHAR(50) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT
+);
+
+-- Наполняем справочник причинами из примера
+INSERT INTO return_reasons (code, name) VALUES
+('size_mismatch', 'Не подошел размер'),
+('quality_issues', 'Проблемы с качеством'),
+('color_difference', 'Цвет не соответствует'),
+('damaged_delivery', 'Повреждение при доставке'),
+('customer_changed_mind', 'Покупатель передумал'),
+('other', 'Другое');
+
+
+-- Таблица возвратов
+CREATE TABLE order_returns (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    order_item_id UUID NOT NULL,
+    reason_code VARCHAR(50) NOT NULL,
+    comment TEXT,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    status VARCHAR(50) NOT NULL DEFAULT 'requested', -- e.g., requested, processing, completed, rejected
+    returned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), -- Дата оформления возврата
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT fk_order_item FOREIGN KEY(order_item_id) REFERENCES order_items(id) ON DELETE CASCADE,
+    CONSTRAINT fk_reason FOREIGN KEY(reason_code) REFERENCES return_reasons(code) ON DELETE RESTRICT
+);
+
+-- Индексы для ускорения аналитических запросов
+CREATE INDEX idx_order_returns_order_item_id ON order_returns(order_item_id);
+CREATE INDEX idx_order_returns_reason_code ON order_returns(reason_code);
+CREATE INDEX idx_order_returns_returned_at ON order_returns(returned_at);
+
+-- Триггер для обновления updated_at
+CREATE TRIGGER update_order_returns_updated_at
+BEFORE UPDATE ON order_returns
+FOR EACH ROW
+EXECUTE PROCEDURE update_updated_at_column();
