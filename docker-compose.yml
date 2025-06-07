@@ -3,7 +3,7 @@ version: "3.8"
 services:
   app:
     build:
-      context: .
+      context: ./back
       dockerfile: Dockerfile
     container_name: kanban_app
     restart: always
@@ -11,12 +11,23 @@ services:
       migrate:
         condition: service_completed_successfully
     env_file:
-      - .env
+      - ./back/.env
     environment:
       - DB_HOST=db
       - DB_PORT=5432
     ports:
       - "${SERVER_PORT:-8080}:${SERVER_PORT:-8080}"
+    networks:
+      - kanban_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kanban_frontend
+    restart: always
+    ports:
+      - "3000:80"
     networks:
       - kanban_network
 
@@ -31,7 +42,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "${DB_PORT}:5432"
+      - "5431:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
