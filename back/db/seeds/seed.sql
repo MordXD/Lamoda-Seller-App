@@ -5,7 +5,7 @@
 DO $$
 DECLARE
     -- Пользователи (Продавцы)
-    user1_id UUID := 'a19a79a5-5a45-420a-994b-118a14b35d61';
+    user1_id UUID := 'd38fa38e-9759-4508-9b17-d80594bfae7e';
     user2_id UUID := 'b29a79a5-5a45-420a-994b-118a14b35d62';
 
     -- Поставщики
@@ -51,7 +51,6 @@ BEGIN
 
 -- === 1. ПОЛЬЗОВАТЕЛИ ===
 INSERT INTO users (id, name, email, hashed_password, balance_kopecks) VALUES
-(user1_id, 'Иван Петров', 'ivan.petrov@example.com', '$2a$10$...', 10000000),
 (user2_id, 'Мария Сидорова', 'maria.sidorova@example.com', '$2a$10$...', 5000000);
 
 -- === 2. ПОСТАВЩИКИ ===
