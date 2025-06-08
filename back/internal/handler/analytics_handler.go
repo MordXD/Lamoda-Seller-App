@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lamoda-seller-app/internal/middleware"
 	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
 )
@@ -21,10 +22,9 @@ func NewAnalyticsHandler(repo repository.AnalyticsRepo) *AnalyticsHandler {
 	return &AnalyticsHandler{repo: repo}
 }
 
-
 // getUserIDFromContext извлекает ID пользователя из контекста Gin.
 func getUserIDFromContext(c *gin.Context) (uuid.UUID, bool) {
-	userIDUntyped, exists := c.Get("userID")
+	userIDUntyped, exists := c.Get(middleware.UserIDKey)
 	if !exists {
 		log.Printf("Error: userID not found in context")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
@@ -126,7 +126,6 @@ func (h *AnalyticsHandler) GetSeasonalTrends(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
-
 
 func (h *AnalyticsHandler) GetReturnsAnalytics(c *gin.Context) {
 	var params model.ReturnsAnalyticsRequestParams

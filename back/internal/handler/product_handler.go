@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -44,7 +45,10 @@ type ListProductsAPIResponse struct {
 
 // ListProducts GET /api/products
 func (h *ProductHandler) ListProducts(c *gin.Context) {
+	log.Printf("🛍️ Products ListProducts: начало обработки запроса")
+
 	// --- Парсинг параметров ---
+	log.Printf("📋 Products ListProducts: парсинг параметров запроса")
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 	minPrice, _ := strconv.ParseFloat(c.DefaultQuery("min_price", "0"), 64)
@@ -70,12 +74,19 @@ func (h *ProductHandler) ListProducts(c *gin.Context) {
 		SortOrder:   c.DefaultQuery("sort_order", "asc"),
 	}
 
+	log.Printf("🔍 Products ListProducts: параметры поиска - поиск: '%s', категория: '%s', бренд: '%s', лимит: %d",
+		params.Search, params.Category, params.Brand, params.Limit)
+
 	// --- Получение данных ---
+	log.Printf("🔍 Products ListProducts: запрос данных из репозитория")
 	products, total, filters, err := h.repo.List(c.Request.Context(), params)
 	if err != nil {
+		log.Printf("❌ Products ListProducts: ошибка получения продуктов: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve products: " + err.Error()})
 		return
 	}
+
+	log.Printf("📊 Products ListProducts: найдено %d продуктов из %d общих", len(products), total)
 
 	// --- Формирование ответа ---
 	response := ListProductsAPIResponse{
@@ -90,31 +101,36 @@ func (h *ProductHandler) ListProducts(c *gin.Context) {
 		Filters: filters,
 	}
 
+	log.Printf("✅ Products ListProducts: успешно сформирован ответ")
 	c.JSON(http.StatusOK, response)
 }
 
 // GetProductByID GET /api/products/{id}
 func (h *ProductHandler) GetProductByID(c *gin.Context) {
+	log.Printf("🛍️ Products GetProductByID: начало обработки запроса")
+
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
+		log.Printf("❌ Products GetProductByID: неверный формат ID продукта: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID format"})
 		return
 	}
 
+	log.Printf("🔍 Products GetProductByID: поиск продукта ID: %s", id)
+
 	product, err := h.repo.GetByID(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("❌ Products GetProductByID: продукт не найден")
 			c.JSON(http.StatusNotFound, gin.H{"error": "product not found"})
 			return
 		}
+		log.Printf("❌ Products GetProductByID: ошибка базы данных: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error: " + err.Error()})
 		return
 	}
 
-	// Запуск хука AfterFind произойдет автоматически в GORM
-	// Если нужны дополнительные вычисления (статистика продаж), их нужно делать здесь,
-	// вызывая другие методы репозитория/сервиса.
-
+	log.Printf("✅ Products GetProductByID: продукт найден - название: %s, бренд: %s", product.Name, product.Brand)
 	c.JSON(http.StatusOK, product)
 }
 

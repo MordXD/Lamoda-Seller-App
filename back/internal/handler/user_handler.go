@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -76,30 +77,40 @@ type WithdrawBalanceRequest struct {
 // --- Хендлеры ---
 
 func (h *UserHandler) Register(c *gin.Context) {
+	log.Printf("👤 User Register: начало обработки запроса")
+
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("❌ User Register: ошибка парсинга JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
 		return
 	}
 
+	log.Printf("📧 User Register: попытка регистрации email: %s, имя: %s", req.Email, req.Name)
+
 	_, err := h.repo.GetByEmail(c.Request.Context(), req.Email)
 	if err == nil {
+		log.Printf("❌ User Register: пользователь с email %s уже существует", req.Email)
 		c.JSON(http.StatusConflict, gin.H{"error": "user with this email already exists"})
 		return
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Printf("❌ User Register: ошибка базы данных при проверке email: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
 		return
 	}
 
+	log.Printf("🔐 User Register: генерация временного пароля")
 	tmpPassword, err := auth.GenerateTemporaryPassword(10)
 	if err != nil {
+		log.Printf("❌ User Register: ошибка генерации временного пароля: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate temporary password"})
 		return
 	}
 
 	hashed, err := bcrypt.GenerateFromPassword([]byte(tmpPassword), bcrypt.DefaultCost)
 	if err != nil {
+		log.Printf("❌ User Register: ошибка хеширования пароля: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
 		return
 	}
@@ -110,17 +121,22 @@ func (h *UserHandler) Register(c *gin.Context) {
 		HashedPassword: string(hashed),
 	}
 
+	log.Printf("💾 User Register: создание пользователя в базе данных")
 	if err := h.repo.Create(c.Request.Context(), user); err != nil {
+		log.Printf("❌ User Register: ошибка создания пользователя: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "user creation failed"})
 		return
 	}
 
+	log.Printf("🎫 User Register: генерация JWT токена для пользователя ID: %s", user.ID)
 	token, err := auth.GenerateJWT(user.ID) // Используем переименованную функцию
 	if err != nil {
+		log.Printf("❌ User Register: ошибка генерации токена: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
 		return
 	}
 
+	log.Printf("✅ User Register: пользователь успешно зарегистрирован - ID: %s, email: %s", user.ID, user.Email)
 	c.JSON(http.StatusCreated, RegisterResponse{
 		Token:             token,
 		TemporaryPassword: tmpPassword,
@@ -128,29 +144,41 @@ func (h *UserHandler) Register(c *gin.Context) {
 }
 
 func (h *UserHandler) Login(c *gin.Context) {
+	log.Printf("🔐 User Login: начало обработки запроса")
+
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("❌ User Login: ошибка парсинга JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input: " + err.Error()})
 		return
 	}
 
+	log.Printf("📧 User Login: попытка входа для email: %s", req.Email)
+
 	user, err := h.repo.GetByEmail(c.Request.Context(), req.Email)
 	if err != nil {
+		log.Printf("❌ User Login: пользователь с email %s не найден: %v", req.Email, err)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
 		return
 	}
+
+	log.Printf("🔍 User Login: пользователь найден - ID: %s, имя: %s", user.ID, user.Name)
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.HashedPassword), []byte(req.Password)); err != nil {
+		log.Printf("❌ User Login: неверный пароль для пользователя %s", req.Email)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
 		return
 	}
 
+	log.Printf("🎫 User Login: генерация JWT токена для пользователя ID: %s", user.ID)
 	token, err := auth.GenerateJWT(user.ID)
 	if err != nil {
+		log.Printf("❌ User Login: ошибка генерации токена: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token generation failed"})
 		return
 	}
 
+	log.Printf("✅ User Login: успешный вход пользователя - ID: %s, email: %s", user.ID, user.Email)
 	c.JSON(http.StatusOK, LoginResponse{Token: token})
 }
 
@@ -191,19 +219,37 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 
 // GetProfile - реализация для вашего роута GET /api/profile
 func (h *UserHandler) GetProfile(c *gin.Context) {
+	log.Printf("👤 User GetProfile: начало обработки запроса")
+
 	userID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+	log.Printf("🔍 User GetProfile: получение профиля для пользователя ID: %s", userID)
 
 	user, err := h.repo.GetByID(c.Request.Context(), userID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("❌ User GetProfile: пользователь не найден")
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 			return
 		}
+		log.Printf("❌ User GetProfile: ошибка базы данных: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "database error"})
 		return
 	}
 
-	c.JSON(http.StatusOK, user) // Теперь можно просто вернуть всю структуру User
+	log.Printf("✅ User GetProfile: профиль найден - имя: %s, email: %s, баланс: %d копеек",
+		user.Name, user.Email, user.BalanceKopecks)
+
+	// Не возвращаем хешированный пароль в ответе
+	response := gin.H{
+		"id":              user.ID,
+		"name":            user.Name,
+		"email":           user.Email,
+		"balance_kopecks": user.BalanceKopecks,
+		"created_at":      user.CreatedAt,
+		"updated_at":      user.UpdatedAt,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // UpdateProfile - реализация для вашего роута PUT /api/profile (для смены имени)

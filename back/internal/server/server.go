@@ -29,20 +29,43 @@ type Server struct {
 	Config *config.Config
 }
 
+// Middleware для подробного логирования запросов
+func requestLoggingMiddleware() gin.HandlerFunc {
+	return gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		return fmt.Sprintf("🌐 [%s] %s %s %d %s \"%s\" %s \"%s\" %s\n",
+			param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+			param.ClientIP,
+			param.Method,
+			param.StatusCode,
+			param.Latency,
+			param.Path,
+			param.Request.Proto,
+			param.Request.UserAgent(),
+			param.ErrorMessage,
+		)
+	})
+}
+
 func Init(cfg *config.Config) (*Server, error) {
+	log.Printf("🚀 Инициализация сервера...")
+	log.Printf("📊 Конфигурация: DB=%s:%s, Server=:%s", cfg.DBHost, cfg.DBPort, cfg.ServerPort)
+
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable TimeZone=UTC",
 		cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPassword, cfg.DBName,
 	)
 
+	log.Printf("🔌 Подключение к базе данных...")
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Info),
 	})
 	if err != nil {
+		log.Printf("❌ Ошибка подключения к БД: %v", err)
 		return nil, fmt.Errorf("failed to connect to DB: %w", err)
 	}
 
 	sqlDB, err := db.DB()
 	if err != nil {
+		log.Printf("❌ Ошибка получения sql.DB: %v", err)
 		return nil, fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
 
@@ -50,16 +73,24 @@ func Init(cfg *config.Config) (*Server, error) {
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetConnMaxLifetime(time.Hour)
 
-	log.Println("✅ Connected to database")
+	log.Println("✅ Подключение к базе данных установлено")
 
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	r := gin.Default()
+
+	log.Printf("🔧 Настройка Gin роутера...")
+	r := gin.New()
+
+	// Добавляем middleware для логирования
+	r.Use(requestLoggingMiddleware())
+	r.Use(gin.Recovery())
 	r.Use(corsMiddleware(cfg))
+
 	// Роут для статических файлов (загруженных изображений)
 	r.Static("/uploads", "./uploads")
 
+	log.Printf("🏗️ Инициализация репозиториев и обработчиков...")
 	// Initialize repositories and handlers
 	userRepo := repository.NewUserRepository(db)
 	productRepo := repository.NewProductRepository(db)
@@ -73,11 +104,13 @@ func Init(cfg *config.Config) (*Server, error) {
 	dashboardHandler := handler.NewDashboardHandler(dashboardRepo)
 	analyticsHandler := handler.NewAnalyticsHandler(analyticsRepo)
 
+	log.Printf("🛣️ Настройка маршрутов...")
 	// Создаем одну родительскую группу /api
 	api := r.Group("/api")
 	{
 		// Health check endpoint внутри /api
 		api.GET("/health", func(c *gin.Context) {
+			log.Printf("💓 Health check запрос")
 			c.JSON(http.StatusOK, gin.H{
 				"status":    "ok",
 				"timestamp": time.Now().UTC(),
@@ -158,6 +191,7 @@ func Init(cfg *config.Config) (*Server, error) {
 		}
 	}
 
+	log.Printf("✅ Сервер инициализирован успешно")
 	return &Server{
 		Engine: r,
 		DB:     db,
@@ -208,22 +242,26 @@ func (s *Server) Run() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	log.Printf("🚀 Запуск сервера на порту %s", s.Config.ServerPort)
+	log.Printf("🌍 Сервер доступен по адресу: http://localhost:%s", s.Config.ServerPort)
+	log.Printf("💊 Health check: http://localhost:%s/api/health", s.Config.ServerPort)
+
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to listen: %s", err)
+			log.Fatalf("❌ Ошибка запуска сервера: %s", err)
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("🛑 Shutting down server...")
+	log.Println("🛑 Получен сигнал остановки, завершение работы сервера...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %s", err)
+		log.Fatalf("❌ Принудительное завершение сервера: %s", err)
 	}
 
-	log.Println("✅ Server exited properly")
+	log.Println("✅ Сервер корректно завершил работу")
 }

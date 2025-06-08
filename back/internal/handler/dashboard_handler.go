@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/lamoda-seller-app/internal/middleware"
 	"github.com/lamoda-seller-app/internal/model"
 	"github.com/lamoda-seller-app/internal/repository"
 )
@@ -38,58 +40,83 @@ type ErrorResponse struct {
 
 // GetStats обрабатывает GET /api/dashboard/stats
 func (h *DashboardHandler) GetStats(c *gin.Context) {
+	log.Printf("📊 Dashboard GetStats: начало обработки запроса")
+
 	var params model.StatsRequestParams
 	if err := c.ShouldBindQuery(&params); err != nil {
+		log.Printf("❌ Dashboard GetStats: ошибка парсинга параметров: %v", err)
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid query parameters: " + err.Error()})
 		return
 	}
 
+	log.Printf("📋 Dashboard GetStats: параметры запроса: %+v", params)
+
+	// Получаем ID пользователя из контекста
+	userID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+	log.Printf("👤 Dashboard GetStats: пользователь ID: %s", userID)
+
 	ctx := c.Request.Context()
 
 	// 1. Рассчитываем временные периоды
+	log.Printf("⏰ Dashboard GetStats: расчет временных периодов")
 	periodInfo, err := calculatePeriods(params)
 	if err != nil {
+		log.Printf("❌ Dashboard GetStats: ошибка расчета периодов: %v", err)
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
+	log.Printf("📅 Dashboard GetStats: период с %s по %s", periodInfo.DateFrom, periodInfo.DateTo)
 
-	// 2. Получаем данные из репозитория
-	currentData, err := h.repo.GetAggregatedData(ctx, periodInfo.DateFrom, periodInfo.DateTo)
+	// 2. Получаем данные из репозитория - теперь с userID
+	log.Printf("🔍 Dashboard GetStats: запрос текущих данных из репозитория")
+	currentData, err := h.repo.GetAggregatedData(ctx, userID, periodInfo.DateFrom, periodInfo.DateTo)
 	if err != nil {
-		log.Printf("ERROR: failed to get current aggregated data: %v", err)
+		log.Printf("❌ Dashboard GetStats: ошибка получения текущих данных: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve dashboard statistics"})
 		return
 	}
+	log.Printf("📈 Dashboard GetStats: текущие данные - выручка: %.2f, заказов: %d, товаров: %d, возвратов: %d",
+		currentData.Revenue, currentData.OrdersCount, currentData.ItemsSoldCount, currentData.ReturnsCount)
 
 	var previousData repository.AggregatedData
 	if params.CompareWithPrevious && periodInfo.PreviousPeriod != nil {
-		previousData, err = h.repo.GetAggregatedData(ctx, periodInfo.PreviousPeriod.DateFrom, periodInfo.PreviousPeriod.DateTo)
+		log.Printf("🔍 Dashboard GetStats: запрос данных предыдущего периода")
+		previousData, err = h.repo.GetAggregatedData(ctx, userID, periodInfo.PreviousPeriod.DateFrom, periodInfo.PreviousPeriod.DateTo)
 		if err != nil {
-			log.Printf("ERROR: failed to get previous aggregated data: %v", err)
+			log.Printf("❌ Dashboard GetStats: ошибка получения данных предыдущего периода: %v", err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve dashboard statistics"})
 			return
 		}
+		log.Printf("📉 Dashboard GetStats: данные предыдущего периода - выручка: %.2f, заказов: %d",
+			previousData.Revenue, previousData.OrdersCount)
 	}
 
-	topCategories, err := h.repo.GetTopCategories(ctx, periodInfo.DateFrom, periodInfo.DateTo, defaultTopCategoriesLimit)
+	log.Printf("🏷️ Dashboard GetStats: запрос топ категорий")
+	topCategories, err := h.repo.GetTopCategories(ctx, userID, periodInfo.DateFrom, periodInfo.DateTo, defaultTopCategoriesLimit)
 	if err != nil {
-		log.Printf("ERROR: failed to get top categories: %v", err)
+		log.Printf("❌ Dashboard GetStats: ошибка получения топ категорий: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve dashboard statistics"})
 		return
 	}
+	log.Printf("🏆 Dashboard GetStats: найдено %d топ категорий", len(topCategories))
 
 	var hourlySalesRaw []model.HourlySale
 	// ИСПРАВЛЕНИЕ: Запрашиваем почасовую статистику только для однодневных периодов
 	if periodInfo.DateTo.Sub(periodInfo.DateFrom) < 25*time.Hour {
-		hourlySalesRaw, err = h.repo.GetHourlySales(ctx, periodInfo.DateFrom, periodInfo.DateTo)
+		log.Printf("⏱️ Dashboard GetStats: запрос почасовых продаж (период < 25 часов)")
+		hourlySalesRaw, err = h.repo.GetHourlySales(ctx, userID, periodInfo.DateFrom, periodInfo.DateTo)
 		if err != nil {
-			log.Printf("ERROR: failed to get hourly sales: %v", err)
+			log.Printf("❌ Dashboard GetStats: ошибка получения почасовых продаж: %v", err)
 			c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve dashboard statistics"})
 			return
 		}
+		log.Printf("📊 Dashboard GetStats: получено %d записей почасовых продаж", len(hourlySalesRaw))
+	} else {
+		log.Printf("⏭️ Dashboard GetStats: пропуск почасовых продаж (период > 25 часов)")
 	}
 
 	// 3. Собираем финальный ответ
+	log.Printf("🔧 Dashboard GetStats: формирование ответа")
 	response := &model.StatsResponse{
 		Period:         *periodInfo,
 		Revenue:        calculateMetric(currentData.Revenue, previousData.Revenue),
@@ -103,35 +130,52 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		HourlySales: fillMissingHours(hourlySalesRaw),
 	}
 
+	log.Printf("✅ Dashboard GetStats: успешно сформирован ответ")
 	c.JSON(http.StatusOK, response)
 }
 
 // GetSalesChart обрабатывает GET /api/dashboard/sales-chart
 func (h *DashboardHandler) GetSalesChart(c *gin.Context) {
+	log.Printf("📈 Dashboard GetSalesChart: начало обработки запроса")
+
 	var params model.SalesChartRequestParams
 	if err := c.ShouldBindQuery(&params); err != nil {
+		log.Printf("❌ Dashboard GetSalesChart: ошибка парсинга параметров: %v", err)
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid query parameters: " + err.Error()})
 		return
 	}
+
+	log.Printf("📋 Dashboard GetSalesChart: параметры запроса: %+v", params)
+
+	// Получаем ID пользователя из контекста
+	userID := c.MustGet(middleware.UserIDKey).(uuid.UUID)
+	log.Printf("👤 Dashboard GetSalesChart: пользователь ID: %s", userID)
+
 	ctx := c.Request.Context()
 
 	// 1. Рассчитываем период и гранулярность
+	log.Printf("⏰ Dashboard GetSalesChart: расчет периода графика")
 	start, end, err := calculateChartPeriod(params.Period)
 	if err != nil {
+		log.Printf("❌ Dashboard GetSalesChart: ошибка расчета периода: %v", err)
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
 	granularity := determineGranularity(params, start, end)
+	log.Printf("📅 Dashboard GetSalesChart: период с %s по %s, гранулярность: %s", start, end, granularity)
 
-	// 2. Получаем данные из репозитория
-	dataPoints, err := h.repo.GetSalesChartData(ctx, start, end, granularity)
+	// 2. Получаем данные из репозитория с userID
+	log.Printf("🔍 Dashboard GetSalesChart: запрос данных графика из репозитория")
+	dataPoints, err := h.repo.GetSalesChartData(ctx, userID, start, end, granularity)
 	if err != nil {
-		log.Printf("ERROR: failed to get sales chart data: %v", err)
+		log.Printf("❌ Dashboard GetSalesChart: ошибка получения данных графика: %v", err)
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "Failed to retrieve sales chart data"})
 		return
 	}
+	log.Printf("📊 Dashboard GetSalesChart: получено %d точек данных", len(dataPoints))
 
 	// 3. Считаем summary и форматируем данные для ответа
+	log.Printf("🔧 Dashboard GetSalesChart: расчет сводки и форматирование данных")
 	summary, formattedData := calculateChartSummaryAndFormatData(dataPoints, granularity)
 
 	response := &model.SalesChartResponse{
@@ -142,6 +186,7 @@ func (h *DashboardHandler) GetSalesChart(c *gin.Context) {
 		Summary:     summary,
 	}
 
+	log.Printf("✅ Dashboard GetSalesChart: успешно сформирован ответ")
 	c.JSON(http.StatusOK, response)
 }
 
